@@ -14,6 +14,7 @@ import TextShow (TextShow(..))
 
 import Types
 import Utils
+import qualified Data.Text as Text
 
 type Builtin = [Expr] -> Eval Expr
 
@@ -36,6 +37,9 @@ mkBuiltins = Context . Map.fromList <$> traverse ctxCell
   , ("cons", cons)
   , ("car", car)
   , ("cdr", cdr)
+  , ("null", primNull)
+  , ("length", primLength)
+  , ("char", primChar)
   , ("print", printExpr)
   ]
   where
@@ -99,6 +103,26 @@ mkBuiltins = Context . Map.fromList <$> traverse ctxCell
     cdr [_] = throwError $ Error "cdr: expected list"
     cdr args = numArgs "cdr" 1 args
 
+    primNull :: Builtin
+    primNull [LList []] = pure $ LBool True
+    primNull [_] = pure $ LBool False
+    primNull args = numArgs "null" 1 args
+
+    primLength :: Builtin
+    primLength [LList xs] = pure $ LInt $ fromIntegral $ length xs
+    primLength [LString xs] = pure $ LInt $ fromIntegral $ Text.length xs
+    primLength [_] = throwError $ Error "length: expected a sequence"
+    primLength args = numArgs "length" 1 args
+
+    primChar :: Builtin
+    primChar [LString t, LInt n] =
+      if n < 0 || n >= fromIntegral (Text.length t)
+      then throwError $ Error $ "char: index " <> showt n <> " out of bounds"
+      else pure $ LChar $ Text.index t (fromIntegral n)
+    primChar [LString _, _] = throwError $ Error "char: expected string as first argument"
+    primChar [_, _] = throwError $ Error "char: expected int as second argument"
+    primChar args = numArgs "char" 2 args
+
     equal :: Builtin
     equal args =
       case args of
@@ -108,6 +132,7 @@ mkBuiltins = Context . Map.fromList <$> traverse ctxCell
         equal' :: Expr -> Expr -> Eval Bool
         equal' (LInt x) (LInt y) = pure (x == y)
         equal' (LBool x) (LBool y) = pure (x == y)
+        equal' (LChar x) (LChar y) = pure (x == y)
         equal' (LString x) (LString y) = pure (x == y)
         equal' (LSymbol x) (LSymbol y) = pure (x == y)
         equal' (LList x) (LList y) =

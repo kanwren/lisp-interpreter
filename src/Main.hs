@@ -8,11 +8,15 @@ import Control.Monad.IO.Class
 import Control.Monad.Trans (lift)
 import Data.Text qualified as Text
 import System.Console.Haskeline (InputT, runInputT, defaultSettings, getInputLine)
+import Control.Monad.Except (MonadError)
 
 import Builtins (mkBuiltins)
 import Eval (eval)
 import Parser (parseLine)
 import Types (Error(..), Eval, runEvalWithContext)
+
+tryError :: MonadError e m => m a -> m (Either e a)
+tryError act = fmap Right act `catchError` (pure . Left)
 
 main :: IO ()
 main = do
@@ -31,9 +35,8 @@ main = do
         case parseLine line of
           Left e -> liftIO $ putStrLn e
           Right Nothing -> pure ()
-          Right (Just expr) -> lift $ do
-            (Right <$> eval expr) `catchError` (pure . Left) >>= \case
-              Right x -> liftIO $ print x
-              Left (Error e) -> liftIO $ putStrLn $ Text.unpack e
+          Right (Just expr) -> lift $ tryError (eval expr) >>= \case
+            Right x -> liftIO $ print x
+            Left (Error e) -> liftIO $ putStrLn $ Text.unpack e
         loop
 

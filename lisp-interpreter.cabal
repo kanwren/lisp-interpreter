@@ -37,7 +37,7 @@ executable lisp-interpreter
                       , containers
                       , mtl
                       , transformers
-                      , text
+                      , text ^>=1.2.5.0
                       , haskeline
                       , exceptions
                       , case-insensitive

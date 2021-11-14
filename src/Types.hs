@@ -20,6 +20,7 @@ import Data.String (IsString(..))
 import Data.Text (Text)
 import TextShow (TextShow(..))
 import TextShow qualified (fromText, unwordsB, FromTextShow(..))
+import qualified Data.Text as Text
 
 newtype Symbol = Symbol { getSymbol :: CI Text }
   deriving newtype (Eq, Ord, IsString)
@@ -41,6 +42,7 @@ data Closure = Closure
 data Expr
   = LInt Integer
   | LBool Bool
+  | LChar Char
   | LString Text
   | LSymbol Symbol
   | LList [Expr]
@@ -53,6 +55,7 @@ renderType :: Expr -> Text
 renderType = \case
   LInt _ -> "int"
   LBool _ -> "bool"
+  LChar _ -> "char"
   LString _ -> "string"
   LSymbol _ -> "symbol"
   LList [] -> "nil"
@@ -61,11 +64,20 @@ renderType = \case
   LBuiltin _ -> "function"
   LFun _ -> "function"
 
+renderChar :: Char -> Text
+renderChar = \case
+  ' ' -> "#\\space"
+  '\t' -> "#\\tab"
+  '\n' -> "#\\newline"
+  '\r' -> "#\\return"
+  c -> "#\\" <> Text.singleton c
+
 instance TextShow Expr where
   showb = \case
     LInt n -> showb n
     LBool False -> "#f"
     LBool True -> "#t"
+    LChar c -> TextShow.fromText $ renderChar c
     LString s -> showb s
     LSymbol s -> TextShow.fromText $ fromSymbol s
     LList [LSymbol "quote", x] -> "'" <> showb x

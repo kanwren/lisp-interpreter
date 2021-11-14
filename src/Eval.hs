@@ -94,6 +94,7 @@ condition cond = truthy <$> eval cond
 eval :: Expr -> Eval Expr
 eval (LInt n) = pure $ LInt n
 eval (LBool b) = pure $ LBool b
+eval (LChar b) = pure $ LChar b
 eval (LString s) = pure $ LString s
 eval (LFun f) = pure $ LFun f
 eval (LBuiltin f) = pure $ LBuiltin f

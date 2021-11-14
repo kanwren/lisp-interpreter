@@ -31,11 +31,19 @@ pExpr = M.choice
   [ pQuote
   , pList
   , pString
-  , try pInt <|> try pBool <|> pSymbol
+  , try pChar <|> try pInt <|> try pBool <|> pSymbol
   ]
   where
     pInt = LInt <$> MCL.signed (pure ()) MCL.decimal
     pBool = fmap LBool $ (MC.string "#f" $> False) <|> (MC.string "#t" $> True)
+    pChar = try pSpecialChar <|> pAnyChar
+    pSpecialChar = fmap LChar $ MC.string "#\\" *> M.choice
+      [ "space" $> ' '
+      , "tab" $> '\t'
+      , "newline" $> '\n'
+      , "return" $> '\r'
+      ]
+    pAnyChar = LChar <$> (MC.string "#\\" *> M.anySingle)
     pString = LString . Text.pack <$> (MC.char '"' *> M.manyTill MCL.charLiteral (MC.char '"'))
     pSymbol = do
       let idChar = MC.letterChar <|> M.oneOf ("+-*/!#$%&|:<=>?@^_~" :: String)
