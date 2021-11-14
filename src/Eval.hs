@@ -108,7 +108,7 @@ eval (LMacro f) = pure $ LMacro f
 eval (LBuiltin f) = pure $ LBuiltin f
 eval (LSymbol sym) = lookupVar sym
 eval (LDottedList xs _) = eval (LList xs)
-eval (LList []) = pure $ LList []
+eval (LList []) = pure nil
 eval (LList (f:args)) =
   case f of
     LSymbol "if" -> do
@@ -137,15 +137,7 @@ eval (LList (f:args)) =
           then pure x'
           else go xs
       go args
-    LSymbol "set" -> do
-      case args of
-        [name, val] -> eval name >>= \case
-          LSymbol name' -> do
-            val' <- eval val
-            setVar name' val'
-            pure val'
-          _ -> throwError $ Error "set: expected symbol as variable name"
-        _ -> numArgs "set" 2 args
+    -- NOTE: could be (defmacro setq (name val) (list 'set (list 'quote name) val)
     LSymbol "setq" -> do
       case args of
         [LSymbol e, val] -> do
@@ -169,16 +161,11 @@ eval (LList (f:args)) =
           pure $ LSymbol e
         [_, _] -> throwError $ Error "defvar: expected symbol as variable name"
         _ -> numArgs "defvar" 2 args
-    LSymbol "eval" ->
-      case args of
-        [e] -> eval e
-        _ -> numArgs "eval" 1 args
     -- NOTE: equivalent to (defmacro quote (x) (list 'quote x))
     LSymbol "quote" ->
       case args of
         [x] -> pure x
         _ -> numArgs "quote" 1 args
-    LSymbol "list" -> LList <$> traverse eval args
     LSymbol "defun" -> do
       case args of
         (LSymbol sym:spec) -> do

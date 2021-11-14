@@ -14,6 +14,7 @@ import TextShow (TextShow(..))
 
 import Types
 import Utils
+import Eval (apply, eval, setVar)
 import qualified Data.Text as Text
 
 type Builtin = [Expr] -> Eval Expr
@@ -34,6 +35,10 @@ mkBuiltins = Context . Map.fromList <$> traverse ctxCell
   , (">=", ige)
   , ("<=", ile)
   , ("equal", equal)
+  , ("set", primSet)
+  , ("eval", primEval)
+  , ("list", list)
+  , ("apply", applyFun)
   , ("cons", cons)
   , ("car", car)
   , ("cdr", cdr)
@@ -84,6 +89,26 @@ mkBuiltins = Context . Map.fromList <$> traverse ctxCell
     ilt = comparison "<" (<)
     ige = comparison ">=" (>=)
     ile = comparison "<=" (<=)
+
+    primSet :: Builtin
+    primSet [LSymbol name, value] = setVar name value $> value
+    primSet [_, _] = throwError $ Error "set: expected symbol as variable name"
+    primSet args = numArgs "set" 2 args
+
+    primEval :: Builtin
+    primEval [e] = eval e
+    primEval args = numArgs "eval" 1 args
+
+    -- could be (defun list xs xs)
+    list :: Builtin
+    list xs = pure $ LList xs
+
+    -- could be (defmacro apply (f xs) (cons f (eval xs)))
+    applyFun :: Builtin
+    applyFun [LFun f, LList xs] = apply f xs
+    applyFun [LFun _, _] = throwError $ Error "apply: expected list for arguments"
+    applyFun [_, _] = throwError $ Error "apply: expected function"
+    applyFun args = numArgs "apply" 2 args
 
     cons :: Builtin
     cons [x, LList y] = pure $ LList (x:y)
