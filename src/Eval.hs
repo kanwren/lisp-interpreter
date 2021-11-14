@@ -3,6 +3,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Eval where
 
@@ -39,7 +40,7 @@ setVar i val = do
       put $ Context $ Map.insert i ref ctx
     Just ref -> liftIO $ writeIORef ref val
 
-function :: Symbol -> Symbol -> Int -> [Expr] -> Eval Expr
+function :: Symbol -> Symbol -> Int -> [Expr] -> Eval Closure
 function opName name n args = case args of
   (params:body) -> do
     context <- get
@@ -50,7 +51,7 @@ function opName name n args = case args of
     case params of
       LList params' -> do
         params'' <- traverse asSymbol params'
-        pure $ LFun Closure
+        pure $ Closure
           { closureName = name
           , closureParams = params''
           , closureVarargs = Nothing
@@ -60,21 +61,20 @@ function opName name n args = case args of
       LDottedList params' rest -> do
         params'' <- traverse asSymbol params'
         varargs <- asSymbol rest
-        pure $ LFun Closure
+        pure $ Closure
           { closureName = name
           , closureParams = params''
           , closureVarargs = Just varargs
           , closureBody = body
           , closureContext = context
           }
-      LSymbol rest -> do
-        pure $ LFun Closure
-          { closureName = name
-          , closureParams = []
-          , closureVarargs = Just rest
-          , closureBody = body
-          , closureContext = context
-          }
+      LSymbol rest -> pure $ Closure
+        { closureName = name
+        , closureParams = []
+        , closureVarargs = Just rest
+        , closureBody = body
+        , closureContext = context
+        }
       _ -> throwError $ Error $ fromSymbol opName <> ": invalid argument list"
   _ -> numArgs opName n args
 
@@ -98,6 +98,7 @@ eval (LChar b) = pure $ LChar b
 eval (LKeyword b) = pure $ LKeyword b
 eval (LString s) = pure $ LString s
 eval (LFun f) = pure $ LFun f
+eval (LMacro f) = pure $ LMacro f
 eval (LBuiltin f) = pure $ LBuiltin f
 eval (LSymbol sym) = lookupVar sym
 eval (LDottedList xs _) = eval (LList xs)
@@ -132,13 +133,12 @@ eval (LList (f:args)) =
       go args
     LSymbol "set" -> do
       case args of
-        [name, val] -> do
-          eval name >>= \case
-            LSymbol name' -> do
-              val' <- eval val
-              setVar name' val'
-              pure val'
-            _ -> throwError $ Error "set: expected symbol as variable name"
+        [name, val] -> eval name >>= \case
+          LSymbol name' -> do
+            val' <- eval val
+            setVar name' val'
+            pure val'
+          _ -> throwError $ Error "set: expected symbol as variable name"
         _ -> numArgs "set" 2 args
     LSymbol "setq" -> do
       case args of
@@ -152,6 +152,7 @@ eval (LList (f:args)) =
       case args of
         [e] -> eval e
         _ -> numArgs "eval" 1 args
+    -- NOTE: equivalent to (defmacro quote (x) (list 'quote x))
     LSymbol "quote" ->
       case args of
         [x] -> pure x
@@ -160,12 +161,12 @@ eval (LList (f:args)) =
     LSymbol "defun" -> do
       case args of
         (LSymbol sym:spec) -> do
-          fun <- function "defun" sym 2 spec
+          fun <- LFun <$> function "defun" sym 2 spec
           setVar sym fun
           pure $ LSymbol sym
         (_:_) -> throwError $ Error "defun: expected symbol for function name"
         _ -> numArgs "defun" 2 args
-    LSymbol "lambda" -> function "lambda" "<lambda>" 1 args
+    LSymbol "lambda" -> LFun <$> function "lambda" "<lambda>" 1 args
     LSymbol "let" -> do
       case args of
         [] -> numArgs "let" 1 args
@@ -175,10 +176,16 @@ eval (LList (f:args)) =
             getBinding (LSymbol name) = pure (name, nil)
             getBinding _ = throwError $ Error "let: invalid variable specification"
           binds <- mkContext =<< traverse getBinding xs
-          localContext (<> binds) $ do
-            progn body
+          localContext (<> binds) $ progn body
         _ -> throwError $ Error "let: invalid variable specification"
-    LSymbol "defmacro" -> undefined
+    LSymbol "defmacro" ->
+      case args of
+        (LSymbol sym:spec) -> do
+          fun <- LMacro <$> function "defmacro" sym 2 spec
+          setVar sym fun
+          pure $ LSymbol sym
+        (_:_) -> throwError $ Error "defmacro: expected symbol for macro name"
+        _ -> numArgs "defmacro" 2 args
     LSymbol "progn" -> progn args
     LSymbol "when" -> do
       case args of
@@ -192,27 +199,24 @@ eval (LList (f:args)) =
           cond' <- condition cond
           if not cond' then progn body else pure nil
         _ -> numArgsAtLeast "unless" 1 args
-    _ -> do
-      eval f >>= \case
-        LBuiltin f' -> do
-          args' <- traverse eval args
-          f' args'
-        LFun f' -> do
-          args' <- traverse eval args
-          let got = length args'
-              expected = length $ closureParams f'
-          binds <- case closureVarargs f' of
-            Nothing
-              | got /= expected -> numArgs (closureName f') expected args'
-              | otherwise -> mkContext (zip (closureParams f') args')
-            Just rest
-              | got < expected -> numArgsAtLeast (closureName f') expected args'
-              | otherwise -> do
-                  let (mainArgs, restArgs) = splitAt expected args'
-                  mkContext (zip (closureParams f') mainArgs <> [(rest, LList restArgs)])
-          localContext (\c -> closureContext f' <> c <> binds) $ do
-            progn (closureBody f')
-        e -> throwError $ Error $ "expected function in s-expr: " <> showt e
+    _ -> eval f >>= \case
+      LBuiltin f' -> f' =<< traverse eval args
+      LFun f' -> apply f' =<< traverse eval args
+      LMacro m -> eval =<< apply m args
+      e -> throwError $ Error $ "expected function in s-expr: " <> showt e
 
--- Builtins
+apply :: Closure -> [Expr] -> Eval Expr
+apply Closure{..} args = do
+  let got = length args
+      expected = length closureParams
+  binds <- case closureVarargs of
+    Nothing
+      | got /= expected -> numArgs closureName expected args
+      | otherwise -> mkContext (zip closureParams args)
+    Just rest
+      | got < expected -> numArgsAtLeast closureName expected args
+      | otherwise -> do
+          let (mainArgs, restArgs) = splitAt expected args
+          mkContext (zip closureParams mainArgs <> [(rest, LList restArgs)])
+  localContext (\c -> closureContext <> c <> binds) $ progn closureBody
 

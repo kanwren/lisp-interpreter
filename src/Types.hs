@@ -61,6 +61,7 @@ data Expr
   | LDottedList [Expr] Expr
   | LBuiltin ([Expr] -> Eval Expr)
   | LFun Closure
+  | LMacro Closure
   deriving Show via (TextShow.FromTextShow Expr)
 
 renderType :: Expr -> Text
@@ -76,6 +77,7 @@ renderType = \case
   LDottedList _ _ -> "cons"
   LBuiltin _ -> "function"
   LFun _ -> "function"
+  LMacro _ -> "macro"
 
 renderChar :: Char -> Text
 renderChar = \case
@@ -100,6 +102,7 @@ instance TextShow Expr where
     LDottedList xs x -> "(" <> TextShow.unwordsB (fmap showb xs) <> " . " <> showb x <> ")"
     LBuiltin _ -> "<builtin>"
     LFun _ -> "<function>"
+    LMacro _ -> "<macro>"
 
 -- Evaluation context (scopes)
 
