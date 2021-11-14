@@ -133,6 +133,7 @@ mkBuiltins = Context . Map.fromList <$> traverse ctxCell
         equal' (LInt x) (LInt y) = pure (x == y)
         equal' (LBool x) (LBool y) = pure (x == y)
         equal' (LChar x) (LChar y) = pure (x == y)
+        equal' (LKeyword x) (LKeyword y) = pure (x == y)
         equal' (LString x) (LString y) = pure (x == y)
         equal' (LSymbol x) (LSymbol y) = pure (x == y)
         equal' (LList x) (LList y) =

@@ -31,6 +31,17 @@ mkSymbol = Symbol . mk
 fromSymbol :: Symbol -> Text
 fromSymbol (Symbol s) = foldedCase s
 
+data Keyword = SymKeyword Symbol | ArbKeyword Text
+  deriving (Eq)
+
+renderKeyword :: Keyword -> Text
+renderKeyword = \case
+  SymKeyword sym -> ":" <> fromSymbol sym
+  ArbKeyword sym -> ":|" <> Text.concatMap escapePipe sym <> "|"
+  where
+    escapePipe '|' = "\\|"
+    escapePipe c = Text.singleton c
+
 data Closure = Closure
   { closureName :: Symbol
   , closureParams :: [Symbol]
@@ -43,6 +54,7 @@ data Expr
   = LInt Integer
   | LBool Bool
   | LChar Char
+  | LKeyword Keyword
   | LString Text
   | LSymbol Symbol
   | LList [Expr]
@@ -56,6 +68,7 @@ renderType = \case
   LInt _ -> "int"
   LBool _ -> "bool"
   LChar _ -> "char"
+  LKeyword _ -> "keyword"
   LString _ -> "string"
   LSymbol _ -> "symbol"
   LList [] -> "nil"
@@ -78,6 +91,7 @@ instance TextShow Expr where
     LBool False -> "#f"
     LBool True -> "#t"
     LChar c -> TextShow.fromText $ renderChar c
+    LKeyword kw -> TextShow.fromText $ renderKeyword kw
     LString s -> showb s
     LSymbol s -> TextShow.fromText $ fromSymbol s
     LList [LSymbol "quote", x] -> "'" <> showb x

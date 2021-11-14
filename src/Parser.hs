@@ -31,7 +31,10 @@ pExpr = M.choice
   [ pQuote
   , pList
   , pString
-  , try pChar <|> try pInt <|> try pBool <|> pSymbol
+  , pKeyword
+  , pChar
+  , pBool
+  , try pInt <|> pSymbol -- needed because of signs in numbers
   ]
   where
     pInt = LInt <$> MCL.signed (pure ()) MCL.decimal
@@ -44,12 +47,17 @@ pExpr = M.choice
       , "return" $> '\r'
       ]
     pAnyChar = LChar <$> (MC.string "#\\" *> M.anySingle)
+    pKeyword = MC.char ':' *> M.choice
+      [ MC.char '|' *> (LKeyword . ArbKeyword . Text.pack <$> M.manyTill (try (MC.string "\\|" $> '|') <|> MCL.charLiteral) (MC.char '|'))
+      , LKeyword . SymKeyword . mkSymbol <$> pIdent -- TODO: this is kinda a hack
+      ]
     pString = LString . Text.pack <$> (MC.char '"' *> M.manyTill MCL.charLiteral (MC.char '"'))
-    pSymbol = do
-      let idChar = MC.letterChar <|> M.oneOf ("+-*/!#$%&|:<=>?@^_~" :: String)
+    pIdent = do
+      let idChar = MC.letterChar <|> M.oneOf ("+-*/!#$%&|:<=>?@^_~." :: String)
       first <- idChar
       rest <- M.many (idChar <|> MC.numberChar)
-      pure $ LSymbol $ mkSymbol $ Text.pack $ first:rest
+      pure $ Text.pack $ first:rest
+    pSymbol = LSymbol . mkSymbol <$> pIdent
     pQuote = MC.char '\'' *> do
       e <- pExpr
       pure $ LList [LSymbol "quote", e]
