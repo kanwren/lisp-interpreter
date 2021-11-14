@@ -7,9 +7,10 @@
 
 module Eval where
 
+import Control.Monad (unless)
 import Control.Monad.Error.Class (throwError)
 import Control.Monad.IO.Class
-import Control.Monad.State ( gets, get, put )
+import Control.Monad.State (gets, get, put,)
 import Data.Functor ((<&>))
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Map.Strict qualified as Map
@@ -23,6 +24,11 @@ nil = LList []
 
 mkContext :: [(Symbol, Expr)] -> Eval Context
 mkContext pairs = liftIO (Context . Map.fromList <$> traverse (\(x, y) -> newIORef y <&> (x,)) pairs)
+
+hasVar :: Symbol -> Eval Bool
+hasVar i = do
+  ctx <- gets getContext
+  pure $ i `Map.member` ctx
 
 lookupVar :: Symbol -> Eval Expr
 lookupVar i = do
@@ -148,6 +154,21 @@ eval (LList (f:args)) =
           pure val'
         [_, _] -> throwError $ Error "setq: expected symbol as variable name"
         _ -> numArgs "setq" 2 args
+    LSymbol "defvar" -> do
+      case args of
+        [LSymbol e, val] -> do
+          exists <- hasVar e
+          unless exists $ setVar e =<< eval val
+          pure $ LSymbol e
+        [_, _] -> throwError $ Error "defvar: expected symbol as variable name"
+        _ -> numArgs "defvar" 2 args
+    LSymbol "defparameter" -> do
+      case args of
+        [LSymbol e, val] -> do
+          setVar e =<< eval val
+          pure $ LSymbol e
+        [_, _] -> throwError $ Error "defvar: expected symbol as variable name"
+        _ -> numArgs "defvar" 2 args
     LSymbol "eval" ->
       case args of
         [e] -> eval e
