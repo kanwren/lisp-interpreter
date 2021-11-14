@@ -125,4 +125,6 @@ runEvalWithContext :: Eval a -> Context -> IO (Either Error a, Context)
 runEvalWithContext (Eval x) ctx = flip runStateT ctx $ runExceptT x
 
 localContext :: (Context -> Context) -> Eval a -> Eval a
-localContext f act = Eval $ ExceptT $ StateT $ \ctx -> runEvalWithContext act (f ctx)
+localContext f act = Eval $ ExceptT $ StateT $ \ctx -> do
+  (res, _) <- runEvalWithContext act (f ctx)
+  pure (res, ctx) -- discard result context and restore old context
