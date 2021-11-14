@@ -171,7 +171,7 @@ eval (LList (f:args)) =
         [] -> numArgs "let" 1 args
         (LList xs:body) -> do
           let
-            getBinding (LList [LSymbol name, val]) = pure (name, val)
+            getBinding (LList [LSymbol name, val]) = (name,) <$> eval val
             getBinding (LSymbol name) = pure (name, nil)
             getBinding _ = throwError $ Error "let: invalid variable specification"
           binds <- mkContext =<< traverse getBinding xs
