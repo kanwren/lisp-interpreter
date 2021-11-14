@@ -1,6 +1,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE RankNTypes #-}
 
 module Builtins (mkBuiltins) where
 
@@ -14,43 +16,47 @@ import TextShow (TextShow(..))
 
 import Types
 import Utils
-import Eval (apply, eval, setVar)
+import Eval (apply, eval, setVar, nil)
 import qualified Data.Text as Text
 
 type Builtin = [Expr] -> Eval Expr
 
 mkBuiltins :: IO Context
 mkBuiltins = Context . Map.fromList <$> traverse ctxCell
-  [ ("+", iadd)
-  , ("-", isub)
-  , ("*", imul)
-  , ("/", idiv)
-  , ("mod", imod)
-  , ("quot", iquot)
-  , ("rem", irem)
-  , ("=", ieq)
-  , ("/=", ine)
-  , (">", igt)
-  , ("<", ilt)
-  , (">=", ige)
-  , ("<=", ile)
-  , ("equal", equal)
-  , ("set", primSet)
-  , ("eval", primEval)
-  , ("list", list)
-  , ("apply", applyFun)
-  , ("cons", cons)
-  , ("car", car)
-  , ("cdr", cdr)
-  , ("null", primNull)
-  , ("length", primLength)
-  , ("char", primChar)
-  , ("print", printExpr)
+  [ ("+", LBuiltin iadd)
+  , ("-", LBuiltin isub)
+  , ("*", LBuiltin imul)
+  , ("/", LBuiltin idiv)
+  , ("mod", LBuiltin imod)
+  , ("quot", LBuiltin iquot)
+  , ("rem", LBuiltin irem)
+  , ("=", LBuiltin ieq)
+  , ("/=", LBuiltin ine)
+  , (">", LBuiltin igt)
+  , ("<", LBuiltin ilt)
+  , (">=", LBuiltin ige)
+  , ("<=", LBuiltin ile)
+  , ("equal", LBuiltin equal)
+  , ("set", LBuiltin primSet)
+  , ("eval", LBuiltin primEval)
+  , ("list", LBuiltin list)
+  , ("apply", LBuiltin primApply)
+  , ("cons", LBuiltin cons)
+  , ("nil", nil)
+  , ("car", LBuiltin car)
+  , ("cdr", LBuiltin cdr)
+  , ("null", LBuiltin primNull)
+  , ("length", LBuiltin primLength)
+  , ("char", LBuiltin primChar)
+  , ("string=", LBuiltin stringEq)
+  , ("string>", LBuiltin stringGt)
+  , ("string<", LBuiltin stringLt)
+  , ("string>=", LBuiltin stringGe)
+  , ("string<=", LBuiltin stringLe)
+  , ("print", LBuiltin printExpr)
   ]
   where
-    ctxCell (name, bi) = do
-      ref <- newIORef (LBuiltin bi)
-      pure (name, ref)
+    ctxCell (name, bi) = (name,) <$> newIORef bi
 
     intFold :: Symbol -> (b -> Integer -> b) -> b -> [Expr] -> Eval b
     intFold name f = foldM go
@@ -77,9 +83,14 @@ mkBuiltins = Context . Map.fromList <$> traverse ctxCell
 
     iadd, isub, imul, idiv, imod, iquot, irem :: Builtin
     iadd = fmap LInt . intFold "+" (+) 0
-    isub = intFold1 "-" (-)
+    -- unary should be negation
+    isub [LInt x] = pure $ LInt (-x)
+    isub args = intFold1 "-" (-) args
     imul = fmap LInt . intFold "*" (*) 1
-    idiv = intFold1 "/" div
+    -- unary should be reciprocal
+    -- TODO: update once rationals are added
+    idiv [LInt x] = pure $ LInt (1 `div` x)
+    idiv args = intFold1 "/" div args
     imod = intFold1 "mod" mod
     iquot = intFold1 "quot" quot
     irem = intFold1 "rem" rem
@@ -103,12 +114,11 @@ mkBuiltins = Context . Map.fromList <$> traverse ctxCell
     list :: Builtin
     list xs = pure $ LList xs
 
-    -- could be (defmacro apply (f xs) (cons f (eval xs)))
-    applyFun :: Builtin
-    applyFun [LFun f, LList xs] = apply f xs
-    applyFun [LFun _, _] = throwError $ Error "apply: expected list for arguments"
-    applyFun [_, _] = throwError $ Error "apply: expected function"
-    applyFun args = numArgs "apply" 2 args
+    primApply :: Builtin
+    primApply [LFun f, LList xs] = apply f xs
+    primApply [LFun _, _] = throwError $ Error "apply: expected list for arguments"
+    primApply [_, _] = throwError $ Error "apply: expected function"
+    primApply args = numArgs "apply" 2 args
 
     cons :: Builtin
     cons [x, LList y] = pure $ LList (x:y)
@@ -148,6 +158,21 @@ mkBuiltins = Context . Map.fromList <$> traverse ctxCell
     primChar [_, _] = throwError $ Error "char: expected int as second argument"
     primChar args = numArgs "char" 2 args
 
+    stringComparison :: Symbol -> (forall e. Ord e => e -> e -> Bool) -> Builtin
+    stringComparison _ cmp [LString x, LString y] = pure $ LBool (cmp x y)
+    stringComparison _ cmp [LKeyword x, LKeyword y] = pure $ LBool (cmp x y)
+    stringComparison _ cmp [LSymbol x, LSymbol y] = pure $ LBool (cmp x y)
+    stringComparison _ cmp [LChar x, LChar y] = pure $ LBool (cmp x y)
+    stringComparison name _ [x, y] = throwError $ Error $ fromSymbol name <> ": invalid argument types " <> renderType x <> " and " <> renderType y
+    stringComparison name _ args = numArgs name 2 args
+
+    stringEq, stringGt, stringLt, stringGe, stringLe :: Builtin
+    stringEq = stringComparison "string=" (==)
+    stringGt = stringComparison "string>" (>)
+    stringLt = stringComparison "string<" (<)
+    stringGe = stringComparison "string>=" (<=)
+    stringLe = stringComparison "string<=" (<=)
+
     equal :: Builtin
     equal args =
       case args of
@@ -176,5 +201,3 @@ mkBuiltins = Context . Map.fromList <$> traverse ctxCell
     printExpr :: Builtin
     printExpr [e] = liftIO (print e) $> e
     printExpr args = numArgs "print" 1 args
-
-

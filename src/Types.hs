@@ -32,7 +32,7 @@ fromSymbol :: Symbol -> Text
 fromSymbol (Symbol s) = foldedCase s
 
 data Keyword = SymKeyword Symbol | ArbKeyword Text
-  deriving (Eq)
+  deriving (Eq, Ord)
 
 renderKeyword :: Keyword -> Text
 renderKeyword = \case
