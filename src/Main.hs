@@ -28,7 +28,7 @@ main = do
   where
     loop :: InputT Eval ()
     loop = getInputLine "> " >>= \case
-      Nothing -> loop
+      Nothing -> pure ()
       Just ":q" -> pure ()
       Just line -> do
         -- TODO: resume!
