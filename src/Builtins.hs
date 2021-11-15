@@ -7,7 +7,6 @@
 module Builtins (mkBuiltins) where
 
 import Control.Monad (foldM, zipWithM)
-import Control.Monad.Error.Class (throwError)
 import Control.Monad.IO.Class
 import Data.Functor (($>))
 import Data.IORef (newIORef)
@@ -62,21 +61,21 @@ mkBuiltins = Context . Map.fromList <$> traverse ctxCell
     intFold name f = foldM go
       where
         go total (LInt n) = pure $ f total n
-        go _ e = throwError $ Error $ fromSymbol name <> ": not a number: " <> showt e
+        go _ e = evalError $ fromSymbol name <> ": not a number: " <> showt e
 
     intFold1 :: Symbol -> (Integer -> Integer -> Integer) -> [Expr] -> Eval Expr
-    intFold1 name _ [] = throwError $ Error $ fromSymbol name <> ": expected at least 1 argument, got 0"
+    intFold1 name _ [] = evalError $ fromSymbol name <> ": expected at least 1 argument, got 0"
     intFold1 name f (LInt x:xs) = LInt <$> intFold name f x xs
-    intFold1 name _ (x:_) = throwError $ Error $ fromSymbol name <> ": not a number: " <> showt x
+    intFold1 name _ (x:_) = evalError $ fromSymbol name <> ": not a number: " <> showt x
 
     intFoldPairwise :: Symbol -> (b -> (Integer, Integer) -> b) -> b -> [Expr] -> Eval b
-    intFoldPairwise name _ _ [] = throwError $ Error $ fromSymbol name <> ": expected at least 1 argument, got 0"
+    intFoldPairwise name _ _ [] = evalError $ fromSymbol name <> ": expected at least 1 argument, got 0"
     intFoldPairwise name f z (LInt x:xs) = go z x xs
       where
         go total _ [] = pure total
         go total prev (LInt y:ys) = go (f total (prev, y)) y ys
-        go _ _ (e:_) = throwError $ Error $ fromSymbol name <> ": not a number: " <> showt e
-    intFoldPairwise name _ _ (x:_) = throwError $ Error $ fromSymbol name <> ": not a number: " <> showt x
+        go _ _ (e:_) = evalError $ fromSymbol name <> ": not a number: " <> showt e
+    intFoldPairwise name _ _ (x:_) = evalError $ fromSymbol name <> ": not a number: " <> showt x
 
     comparison :: Symbol -> (Integer -> Integer -> Bool) -> Builtin
     comparison name f = fmap LBool . intFoldPairwise name (\b (x, y) -> b && f x y) True
@@ -103,7 +102,7 @@ mkBuiltins = Context . Map.fromList <$> traverse ctxCell
 
     primSet :: Builtin
     primSet [LSymbol name, value] = setVar name value $> value
-    primSet [_, _] = throwError $ Error "set: expected symbol as variable name"
+    primSet [_, _] = evalError "set: expected symbol as variable name"
     primSet args = numArgs "set" 2 args
 
     primEval :: Builtin
@@ -116,8 +115,8 @@ mkBuiltins = Context . Map.fromList <$> traverse ctxCell
 
     primApply :: Builtin
     primApply [LFun f, LList xs] = apply f xs
-    primApply [LFun _, _] = throwError $ Error "apply: expected list for arguments"
-    primApply [_, _] = throwError $ Error "apply: expected function"
+    primApply [LFun _, _] = evalError "apply: expected list for arguments"
+    primApply [_, _] = evalError "apply: expected function"
     primApply args = numArgs "apply" 2 args
 
     cons :: Builtin
@@ -127,15 +126,15 @@ mkBuiltins = Context . Map.fromList <$> traverse ctxCell
     cons args = numArgs "cons" 2 args
 
     car :: Builtin
-    car [LList []] = throwError $ Error "car: empty list"
+    car [LList []] = evalError "car: empty list"
     car [LList (x:_)] = pure x
-    car [_] = throwError $ Error "car: expected list"
+    car [_] = evalError "car: expected list"
     car args = numArgs "car" 1 args
 
     cdr :: Builtin
-    cdr [LList []] = throwError $ Error "cdr: empty list"
+    cdr [LList []] = evalError "cdr: empty list"
     cdr [LList (_:xs)] = pure $ LList xs
-    cdr [_] = throwError $ Error "cdr: expected list"
+    cdr [_] = evalError "cdr: expected list"
     cdr args = numArgs "cdr" 1 args
 
     primNull :: Builtin
@@ -146,16 +145,16 @@ mkBuiltins = Context . Map.fromList <$> traverse ctxCell
     primLength :: Builtin
     primLength [LList xs] = pure $ LInt $ fromIntegral $ length xs
     primLength [LString xs] = pure $ LInt $ fromIntegral $ Text.length xs
-    primLength [_] = throwError $ Error "length: expected a sequence"
+    primLength [_] = evalError "length: expected a sequence"
     primLength args = numArgs "length" 1 args
 
     primChar :: Builtin
     primChar [LString t, LInt n] =
       if n < 0 || n >= fromIntegral (Text.length t)
-      then throwError $ Error $ "char: index " <> showt n <> " out of bounds"
+      then evalError $ "char: index " <> showt n <> " out of bounds"
       else pure $ LChar $ Text.index t (fromIntegral n)
-    primChar [LString _, _] = throwError $ Error "char: expected string as first argument"
-    primChar [_, _] = throwError $ Error "char: expected int as second argument"
+    primChar [LString _, _] = evalError "char: expected string as first argument"
+    primChar [_, _] = evalError "char: expected int as second argument"
     primChar args = numArgs "char" 2 args
 
     stringComparison :: Symbol -> (forall e. Ord e => e -> e -> Bool) -> Builtin
@@ -163,7 +162,7 @@ mkBuiltins = Context . Map.fromList <$> traverse ctxCell
     stringComparison _ cmp [LKeyword x, LKeyword y] = pure $ LBool (cmp x y)
     stringComparison _ cmp [LSymbol x, LSymbol y] = pure $ LBool (cmp x y)
     stringComparison _ cmp [LChar x, LChar y] = pure $ LBool (cmp x y)
-    stringComparison name _ [x, y] = throwError $ Error $ fromSymbol name <> ": invalid argument types " <> renderType x <> " and " <> renderType y
+    stringComparison name _ [x, y] = evalError $ fromSymbol name <> ": invalid argument types " <> renderType x <> " and " <> renderType y
     stringComparison name _ args = numArgs name 2 args
 
     stringEq, stringGt, stringLt, stringGe, stringLe :: Builtin
@@ -196,7 +195,7 @@ mkBuiltins = Context . Map.fromList <$> traverse ctxCell
           else (&&) <$> (and <$> zipWithM equal' x y) <*> equal' x' y'
         equal' (LBuiltin _) (LBuiltin _) = pure False
         equal' (LFun _) (LFun _) = pure False
-        equal' x y = throwError $ Error $ "equal: incompatible types " <> renderType x <> " and " <> renderType y
+        equal' x y = evalError $ "equal: incompatible types " <> renderType x <> " and " <> renderType y
 
     printExpr :: Builtin
     printExpr [e] = liftIO (print e) $> e

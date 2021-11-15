@@ -8,7 +8,7 @@
 module Types where
 
 import Control.Monad.Catch (MonadMask, MonadCatch, MonadThrow)
-import Control.Monad.Except ( ExceptT (ExceptT), runExceptT, MonadError )
+import Control.Monad.Except ( throwError, ExceptT(ExceptT), runExceptT, MonadError )
 import Control.Monad.IO.Class
 import Control.Monad.State ( MonadState )
 import Control.Monad.State.Strict (StateT (StateT), runStateT)
@@ -18,9 +18,9 @@ import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.String (IsString(..))
 import Data.Text (Text)
+import Data.Text qualified as Text
 import TextShow (TextShow(..))
 import TextShow qualified (fromText, unwordsB, FromTextShow(..))
-import qualified Data.Text as Text
 
 newtype Symbol = Symbol { getSymbol :: CI Text }
   deriving newtype (Eq, Ord, IsString)
@@ -43,7 +43,7 @@ renderKeyword = \case
     escapePipe c = Text.singleton c
 
 data Closure = Closure
-  { closureName :: Symbol
+  { closureName :: Maybe Symbol
   , closureParams :: [Symbol]
   , closureVarargs :: Maybe Symbol
   , closureBody :: [Expr]
@@ -108,6 +108,10 @@ instance TextShow Expr where
 
 newtype Error = Error { getError :: Text }
 
+data Bubble
+  = ReturnFrom Symbol Expr
+  | EvalError Error
+
 newtype Context = Context { getContext :: Map Symbol (IORef Expr) }
 
 -- Right-biased
@@ -118,13 +122,16 @@ instance Monoid Context where
 
 -- Eval
 
-newtype Eval a = Eval { getEval :: ExceptT Error (StateT Context IO) a }
+newtype Eval a = Eval { getEval :: ExceptT Bubble (StateT Context IO) a }
   deriving newtype (Functor, Applicative, Monad)
-  deriving newtype (MonadState Context, MonadError Error)
+  deriving newtype (MonadState Context, MonadError Bubble)
   deriving newtype (MonadThrow, MonadCatch, MonadMask)
   deriving newtype (MonadIO)
 
-runEvalWithContext :: Eval a -> Context -> IO (Either Error a, Context)
+evalError :: Text -> Eval a
+evalError = throwError . EvalError . Error
+
+runEvalWithContext :: Eval a -> Context -> IO (Either Bubble a, Context)
 runEvalWithContext (Eval x) ctx = flip runStateT ctx $ runExceptT x
 
 localContext :: (Context -> Context) -> Eval a -> Eval a

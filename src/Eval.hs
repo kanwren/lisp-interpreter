@@ -8,12 +8,13 @@
 module Eval where
 
 import Control.Monad (unless)
-import Control.Monad.Error.Class (throwError)
+import Control.Monad.Except (catchError, throwError)
 import Control.Monad.IO.Class
 import Control.Monad.State (gets, get, put,)
 import Data.Functor ((<&>))
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Map.Strict qualified as Map
+import Data.Maybe (fromMaybe)
 import TextShow (TextShow(..))
 
 import Types
@@ -34,7 +35,7 @@ lookupVar :: Symbol -> Eval Expr
 lookupVar i = do
   ctx <- gets getContext
   case ctx Map.!? i of
-    Nothing -> throwError $ Error $ "variable not in scope: " <> fromSymbol i
+    Nothing -> evalError $ "variable not in scope: " <> fromSymbol i
     Just x  -> liftIO $ readIORef x
 
 setVar :: Symbol -> Expr -> Eval ()
@@ -46,14 +47,14 @@ setVar i val = do
       put $ Context $ Map.insert i ref ctx
     Just ref -> liftIO $ writeIORef ref val
 
-function :: Symbol -> Symbol -> Int -> [Expr] -> Eval Closure
+function :: Symbol -> Maybe Symbol -> Int -> [Expr] -> Eval Closure
 function opName name n args = case args of
   (params:body) -> do
     context <- get
     let
       asSymbol :: Expr -> Eval Symbol
       asSymbol (LSymbol s) = pure s
-      asSymbol _ = throwError $ Error $ fromSymbol opName <> ": invalid argument list"
+      asSymbol _ = evalError $ fromSymbol opName <> ": invalid argument list"
     case params of
       LList params' -> do
         params'' <- traverse asSymbol params'
@@ -81,13 +82,21 @@ function opName name n args = case args of
         , closureBody = body
         , closureContext = context
         }
-      _ -> throwError $ Error $ fromSymbol opName <> ": invalid argument list"
+      _ -> evalError $ fromSymbol opName <> ": invalid argument list"
   _ -> numArgs opName n args
 
 progn :: [Expr] -> Eval Expr
 progn [] = pure nil
 progn [x] = eval x
 progn (x:y) = eval x *> progn y
+
+block :: Symbol -> Eval Expr -> Eval Expr
+block blockName a =
+  a `catchError` \case
+    ReturnFrom target val
+      | blockName == target -> pure val
+      -- NOTE: non-matching block names should bubble up
+    e -> throwError e
 
 truthy :: Expr -> Bool
 truthy = \case
@@ -144,7 +153,7 @@ eval (LList (f:args)) =
           val' <- eval val
           setVar e val'
           pure val'
-        [_, _] -> throwError $ Error "setq: expected symbol as variable name"
+        [_, _] -> evalError "setq: expected symbol as variable name"
         _ -> numArgs "setq" 2 args
     LSymbol "defvar" -> do
       case args of
@@ -152,14 +161,14 @@ eval (LList (f:args)) =
           exists <- hasVar e
           unless exists $ setVar e =<< eval val
           pure $ LSymbol e
-        [_, _] -> throwError $ Error "defvar: expected symbol as variable name"
+        [_, _] -> evalError "defvar: expected symbol as variable name"
         _ -> numArgs "defvar" 2 args
     LSymbol "defparameter" -> do
       case args of
         [LSymbol e, val] -> do
           setVar e =<< eval val
           pure $ LSymbol e
-        [_, _] -> throwError $ Error "defvar: expected symbol as variable name"
+        [_, _] -> evalError "defvar: expected symbol as variable name"
         _ -> numArgs "defvar" 2 args
     -- NOTE: equivalent to (defmacro quote (x) (list 'quote x))
     LSymbol "quote" ->
@@ -169,12 +178,12 @@ eval (LList (f:args)) =
     LSymbol "defun" -> do
       case args of
         (LSymbol sym:spec) -> do
-          fun <- LFun <$> function "defun" sym 2 spec
+          fun <- LFun <$> function "defun" (Just sym) 2 spec
           setVar sym fun
           pure $ LSymbol sym
-        (_:_) -> throwError $ Error "defun: expected symbol for function name"
+        (_:_) -> evalError "defun: expected symbol for function name"
         _ -> numArgs "defun" 2 args
-    LSymbol "lambda" -> LFun <$> function "lambda" "<lambda>" 1 args
+    LSymbol "lambda" -> LFun <$> function "lambda" Nothing 1 args
     LSymbol "let" -> do
       case args of
         [] -> numArgs "let" 1 args
@@ -182,17 +191,17 @@ eval (LList (f:args)) =
           let
             getBinding (LList [LSymbol name, val]) = (name,) <$> eval val
             getBinding (LSymbol name) = pure (name, nil)
-            getBinding _ = throwError $ Error "let: invalid variable specification"
+            getBinding _ = evalError "let: invalid variable specification"
           binds <- mkContext =<< traverse getBinding xs
           localContext (<> binds) $ progn body
-        _ -> throwError $ Error "let: invalid variable specification"
+        _ -> evalError "let: invalid variable specification"
     LSymbol "defmacro" ->
       case args of
         (LSymbol sym:spec) -> do
-          fun <- LMacro <$> function "defmacro" sym 2 spec
+          fun <- LMacro <$> function "defmacro" (Just sym) 2 spec
           setVar sym fun
           pure $ LSymbol sym
-        (_:_) -> throwError $ Error "defmacro: expected symbol for macro name"
+        (_:_) -> evalError "defmacro: expected symbol for macro name"
         _ -> numArgs "defmacro" 2 args
     LSymbol "progn" -> progn args
     LSymbol "when" -> do
@@ -207,24 +216,46 @@ eval (LList (f:args)) =
           cond' <- condition cond
           if not cond' then progn body else pure nil
         _ -> numArgsAtLeast "unless" 1 args
+    LSymbol "block" -> do
+      case args of
+        (LSymbol blockName:body) -> do
+          block blockName $ progn body
+        (_:_) -> evalError "block: expected symbol as block name"
+        _ -> numArgsAtLeast "block" 1 args
+    LSymbol "return-from" -> do
+      case args of
+        [LSymbol blockName] -> throwError $ ReturnFrom blockName nil
+        [LSymbol blockName, val] -> throwError $ ReturnFrom blockName val
+        [_] -> evalError "return-from: expected symbol for block name"
+        [_, _] -> evalError "return-from: expected symbol for block name"
+        _ -> numArgsBound "return-from" (1, 2) args
     _ -> eval f >>= \case
       LBuiltin f' -> f' =<< traverse eval args
       LFun f' -> apply f' =<< traverse eval args
       LMacro m -> eval =<< apply m args
-      e -> throwError $ Error $ "expected function in s-expr: " <> showt e
+      e -> evalError $ "expected function in s-expr: " <> showt e
 
 apply :: Closure -> [Expr] -> Eval Expr
 apply Closure{..} args = do
   let got = length args
       expected = length closureParams
+      name = fromMaybe "<anonymous>" closureName
   binds <- case closureVarargs of
     Nothing
-      | got /= expected -> numArgs closureName expected args
+      | got /= expected -> numArgs name expected args
       | otherwise -> mkContext (zip closureParams args)
     Just rest
-      | got < expected -> numArgsAtLeast closureName expected args
+      | got < expected -> numArgsAtLeast name expected args
       | otherwise -> do
           let (mainArgs, restArgs) = splitAt expected args
           mkContext (zip closureParams mainArgs <> [(rest, LList restArgs)])
-  localContext (\c -> closureContext <> c <> binds) $ progn closureBody
+  localContext (\c -> closureContext <> c <> binds) $ do
+    progn closureBody `catchError` \case
+      -- all (return-from)s need to be caught, or else we could bubble out of
+      -- the current function! this is contrasted with `block`, which should
+      -- let any (return-from)s with a different label to bubble up
+      ReturnFrom blockName val
+        | Just blockName == closureName -> pure val
+        | otherwise -> evalError $ fromSymbol name <> ": error returning from block " <> showt (fromSymbol blockName) <> ": no such block in scope"
+      e -> throwError e
 
