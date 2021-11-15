@@ -226,6 +226,9 @@ eval (LList (f:args)) =
       case args of
         [LSymbol blockName] -> throwError $ ReturnFrom blockName nil
         [LSymbol blockName, val] -> throwError $ ReturnFrom blockName val
+        -- TODO: this should be generalized; 'nil and () are the same in CL
+        [LList []] -> throwError $ ReturnFrom "nil" nil
+        [LList [], val] -> throwError $ ReturnFrom "nil" val
         [_] -> evalError "return-from: expected symbol for block name"
         [_, _] -> evalError "return-from: expected symbol for block name"
         _ -> numArgsBound "return-from" (1, 2) args

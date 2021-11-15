@@ -109,7 +109,6 @@ mkBuiltins = Context . Map.fromList <$> traverse ctxCell
     primEval [e] = eval e
     primEval args = numArgs "eval" 1 args
 
-    -- could be (defun list xs xs)
     list :: Builtin
     list xs = pure $ LList xs
 
