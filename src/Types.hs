@@ -108,8 +108,21 @@ instance TextShow Expr where
 
 newtype Error = Error { getError :: Text }
 
+data TagName
+  = TagInt Integer
+  | TagSymbol Symbol
+  | TagKeyword Keyword
+  deriving (Eq, Ord)
+
+renderTagName :: TagName -> Text
+renderTagName = \case
+  TagInt n -> showt n
+  TagSymbol sym -> fromSymbol sym
+  TagKeyword kw -> renderKeyword kw
+
 data Bubble
   = ReturnFrom Symbol Expr
+  | TagGo TagName
   | EvalError Error
 
 newtype Context = Context { getContext :: Map Symbol (IORef Expr) }
@@ -127,9 +140,6 @@ newtype Eval a = Eval { getEval :: ExceptT Bubble (StateT Context IO) a }
   deriving newtype (MonadState Context, MonadError Bubble)
   deriving newtype (MonadThrow, MonadCatch, MonadMask)
   deriving newtype (MonadIO)
-
-evalError :: Text -> Eval a
-evalError = throwError . EvalError . Error
 
 runEvalWithContext :: Eval a -> Context -> IO (Either Bubble a, Context)
 runEvalWithContext (Eval x) ctx = flip runStateT ctx $ runExceptT x

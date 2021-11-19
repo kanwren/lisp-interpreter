@@ -4,21 +4,28 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE BangPatterns #-}
 
 module Eval where
 
 import Control.Monad (unless)
 import Control.Monad.Except (catchError, throwError)
 import Control.Monad.IO.Class
-import Control.Monad.State (gets, get, put,)
+import Control.Monad.State (gets, get, put)
+import Data.Foldable (foldlM)
 import Data.Functor ((<&>))
 import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
+import Data.Set (Set)
+import Data.Set qualified as Set
+import Data.Vector (Vector)
+import Data.Vector qualified as Vector
 import TextShow (TextShow(..))
 
 import Types
-import Utils
+import Errors
 
 nil :: Expr
 nil = LList []
@@ -38,14 +45,38 @@ lookupVar i = do
     Nothing -> evalError $ "variable not in scope: " <> fromSymbol i
     Just x  -> liftIO $ readIORef x
 
+specialOps :: Set Symbol
+specialOps = Set.fromList
+  [ "if"
+  , "and"
+  , "or"
+  , "setq"
+  , "defvar"
+  , "defparameter"
+  , "quote"
+  , "defun"
+  , "lambda"
+  , "let"
+  , "defmacro"
+  , "progn"
+  , "when"
+  , "unless"
+  , "block"
+  , "return-from"
+  , "go"
+  , "tagbody"
+  ]
+
 setVar :: Symbol -> Expr -> Eval ()
-setVar i val = do
-  ctx <- gets getContext
-  case ctx Map.!? i of
-    Nothing -> do
-      ref <- liftIO $ newIORef val
-      put $ Context $ Map.insert i ref ctx
-    Just ref -> liftIO $ writeIORef ref val
+setVar i val
+  | i `Set.member` specialOps = evalError $ "error: " <> fromSymbol i <> " is a special operator and may not be overridden"
+  | otherwise = do
+    ctx <- gets getContext
+    case ctx Map.!? i of
+      Nothing -> do
+        ref <- liftIO $ newIORef val
+        put $ Context $ Map.insert i ref ctx
+      Just ref -> liftIO $ writeIORef ref val
 
 function :: Symbol -> Maybe Symbol -> Int -> [Expr] -> Eval Closure
 function opName name n args = case args of
@@ -85,10 +116,28 @@ function opName name n args = case args of
       _ -> evalError $ fromSymbol opName <> ": invalid argument list"
   _ -> numArgs opName n args
 
+-- Evaluate a list of expressions and return the value of the final expression
 progn :: [Expr] -> Eval Expr
 progn [] = pure nil
 progn [x] = eval x
 progn (x:y) = eval x *> progn y
+
+buildTagTable :: [Expr] -> Eval (Map TagName Int, Vector Expr)
+buildTagTable = fmap collect . foldlM go (0, mempty, mempty)
+  where
+    collect (_, tagTable, exprs) = (tagTable, Vector.fromList (reverse exprs))
+    go :: (Int, Map TagName Int, [Expr]) -> Expr -> Eval (Int, Map TagName Int, [Expr])
+    go (i, tagTable, exprs) = \case
+      -- normal symbols
+      LSymbol sym -> pure (i, Map.insert (TagSymbol sym) i tagTable, exprs)
+      LKeyword b -> pure (i, Map.insert (TagKeyword b) i tagTable, exprs)
+      LInt n -> pure (i, Map.insert (TagInt n) i tagTable, exprs)
+      -- NIL symbol
+      LList [] -> pure (i, Map.insert (TagSymbol "nil") i tagTable, exprs)
+      -- sexprs
+      sx@(LList _) -> pure (i + 1, tagTable, sx:exprs)
+      sx@(LDottedList _ _) -> pure (i + 1, tagTable, sx:exprs)
+      e -> evalError $ "tagbody: invalid tag or form type: " <> renderType e
 
 block :: Symbol -> Eval Expr -> Eval Expr
 block blockName a =
@@ -216,10 +265,11 @@ eval (LList (f:args)) =
           cond' <- condition cond
           if not cond' then progn body else pure nil
         _ -> numArgsAtLeast "unless" 1 args
+    -- NOTE: allowed block names are nil and symbols
     LSymbol "block" -> do
       case args of
-        (LSymbol blockName:body) -> do
-          block blockName $ progn body
+        (LSymbol blockName:body) -> block blockName $ progn body
+        (LList []:body) -> block "nil" $ progn body
         (_:_) -> evalError "block: expected symbol as block name"
         _ -> numArgsAtLeast "block" 1 args
     LSymbol "return-from" -> do
@@ -232,6 +282,36 @@ eval (LList (f:args)) =
         [_] -> evalError "return-from: expected symbol for block name"
         [_, _] -> evalError "return-from: expected symbol for block name"
         _ -> numArgsBound "return-from" (1, 2) args
+    LSymbol "go" -> do
+      case args of
+        [LSymbol sym] -> throwError $ TagGo $ TagSymbol sym
+        [LKeyword b] -> throwError $ TagGo $ TagKeyword b
+        [LInt n] -> throwError $ TagGo $ TagInt n
+        [LList []] -> throwError $ TagGo $ TagSymbol "nil"
+        [e] -> evalError $ "go: invalid tag type: " <> renderType e
+        _ -> numArgs "go" 1 args
+    -- NOTE: allowed tags are numbers, symbols, keywords, and nil
+    LSymbol "tagbody" -> do
+      -- collect arguments into vectors, construct table mapping symbols to
+      -- indices
+      -- (watch out for symbols on end and consecutive symbols)
+      -- evaluate progn at index 0
+      -- catch any TagGo exceptions, and if there's an appropriate tag name in
+      -- scope, start evaluating there
+      (table, exprs) <- buildTagTable args
+      let
+        len = Vector.length exprs
+        runAt !ix =
+          if ix < 0 || ix >= len
+          then pure ()
+          else eval (exprs Vector.! ix) *> runAt (ix + 1)
+        go !ix =
+          runAt ix `catchError` \case
+            TagGo tagName
+              | Just ix' <- table Map.!? tagName -> go ix'
+            e -> throwError e
+      go 0
+      pure nil
     _ -> eval f >>= \case
       LBuiltin f' -> f' =<< traverse eval args
       LFun f' -> apply f' =<< traverse eval args
@@ -260,5 +340,6 @@ apply Closure{..} args = do
       ReturnFrom blockName val
         | Just blockName == closureName -> pure val
         | otherwise -> evalError $ fromSymbol name <> ": error returning from block " <> showt (fromSymbol blockName) <> ": no such block in scope"
+      TagGo tagName -> evalError $ fromSymbol name <> ": error going to tag " <> renderTagName tagName <> ": no such tag in scope"
       e -> throwError e
 

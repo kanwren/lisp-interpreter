@@ -1,12 +1,17 @@
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Utils where
+module Errors where
 
+import Control.Monad.Except (throwError)
+import Data.Text (Text)
 import Data.Text qualified as Text
 import TextShow (TextShow(..))
 
 import Types
+
+evalError :: Text -> Eval a
+evalError = throwError . EvalError . Error
 
 numArgs :: Symbol -> Int -> [Expr] -> Eval a
 numArgs name n xs

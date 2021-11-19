@@ -53,9 +53,13 @@ pExpr = M.choice
       ]
     pString = LString . Text.pack <$> (MC.char '"' *> M.manyTill MCL.charLiteral (MC.char '"'))
     pIdent = do
-      let idChar = MC.letterChar <|> M.oneOf ("+-*/!#$%&|:<=>?@^_~." :: String)
+      let idChar = MC.letterChar <|> M.oneOf ("+-*/!$%&|:<=>?@^_~." :: String)
+      let idTailChar = idChar <|> MC.numberChar <|> M.oneOf ("#" :: String)
       first <- idChar
-      rest <- M.many (idChar <|> MC.numberChar)
+      rest <- do
+        if first == '.'
+        then M.some idTailChar
+        else M.many idTailChar
       pure $ Text.pack $ first:rest
     pSymbol = LSymbol . mkSymbol <$> pIdent
     pQuote = MC.char '\'' *> do
@@ -63,7 +67,7 @@ pExpr = M.choice
       pure $ LList [LSymbol "quote", e]
     pList = do
       void $ symbol "("
-      res <- M.sepEndBy pExpr space
+      res <- M.sepEndBy (try pExpr) space
       dotted <- optional $ symbol "." *> lexeme pExpr
       void $ MC.char ')'
       case dotted of

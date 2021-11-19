@@ -28,7 +28,7 @@ executable lisp-interpreter
       Parser
       Types
       Builtins
-      Utils
+      Errors
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
@@ -42,6 +42,7 @@ executable lisp-interpreter
                       , exceptions
                       , case-insensitive
                       , text-show
+                      , vector
     hs-source-dirs:   src
     default-language: Haskell2010
     ghc-options:

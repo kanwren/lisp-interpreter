@@ -8,55 +8,61 @@ module Builtins (mkBuiltins) where
 
 import Control.Monad (foldM, zipWithM)
 import Control.Monad.IO.Class
+import Data.Bifunctor (second)
 import Data.Functor (($>))
 import Data.IORef (newIORef)
 import Data.Map.Strict qualified as Map
+import Data.Text qualified as Text
 import TextShow (TextShow(..))
 
 import Types
-import Utils
+import Errors
 import Eval (apply, eval, setVar, nil)
-import qualified Data.Text as Text
 
 type Builtin = [Expr] -> Eval Expr
 
 mkBuiltins :: IO Context
-mkBuiltins = Context . Map.fromList <$> traverse ctxCell
-  [ ("+", LBuiltin iadd)
-  , ("-", LBuiltin isub)
-  , ("*", LBuiltin imul)
-  , ("/", LBuiltin idiv)
-  , ("mod", LBuiltin imod)
-  , ("quot", LBuiltin iquot)
-  , ("rem", LBuiltin irem)
-  , ("=", LBuiltin ieq)
-  , ("/=", LBuiltin ine)
-  , (">", LBuiltin igt)
-  , ("<", LBuiltin ilt)
-  , (">=", LBuiltin ige)
-  , ("<=", LBuiltin ile)
-  , ("equal", LBuiltin equal)
-  , ("set", LBuiltin primSet)
-  , ("eval", LBuiltin primEval)
-  , ("list", LBuiltin list)
-  , ("apply", LBuiltin primApply)
-  , ("cons", LBuiltin cons)
-  , ("nil", nil)
-  , ("car", LBuiltin car)
-  , ("cdr", LBuiltin cdr)
-  , ("null", LBuiltin primNull)
-  , ("length", LBuiltin primLength)
-  , ("char", LBuiltin primChar)
-  , ("string=", LBuiltin stringEq)
-  , ("string>", LBuiltin stringGt)
-  , ("string<", LBuiltin stringLt)
-  , ("string>=", LBuiltin stringGe)
-  , ("string<=", LBuiltin stringLe)
-  , ("print", LBuiltin printExpr)
+mkBuiltins = fmap (Context . Map.fromList) $ traverse ctxCell $ concat
+  [ builtinPrims
+  , builtinDefs
   ]
   where
     ctxCell (name, bi) = (name,) <$> newIORef bi
 
+builtinPrims :: [(Symbol, Expr)]
+builtinPrims = fmap (second LBuiltin)
+  [ ("+", iadd)
+  , ("-", isub)
+  , ("*", imul)
+  , ("/", idiv)
+  , ("mod", imod)
+  , ("quot", iquot)
+  , ("rem", irem)
+  , ("=", ieq)
+  , ("/=", ine)
+  , (">", igt)
+  , ("<", ilt)
+  , (">=", ige)
+  , ("<=", ile)
+  , ("equal", equal)
+  , ("set", primSet)
+  , ("eval", primEval)
+  , ("list", list)
+  , ("apply", primApply)
+  , ("cons", cons)
+  , ("car", car)
+  , ("cdr", cdr)
+  , ("null", primNull)
+  , ("length", primLength)
+  , ("char", primChar)
+  , ("string=", stringEq)
+  , ("string>", stringGt)
+  , ("string<", stringLt)
+  , ("string>=", stringGe)
+  , ("string<=", stringLe)
+  , ("print", printExpr)
+  ]
+  where
     intFold :: Symbol -> (b -> Integer -> b) -> b -> [Expr] -> Eval b
     intFold name f = foldM go
       where
@@ -199,3 +205,8 @@ mkBuiltins = Context . Map.fromList <$> traverse ctxCell
     printExpr :: Builtin
     printExpr [e] = liftIO (print e) $> e
     printExpr args = numArgs "print" 1 args
+
+builtinDefs :: [(Symbol, Expr)]
+builtinDefs =
+  [ ("nil", nil)
+  ]

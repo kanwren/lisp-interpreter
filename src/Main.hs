@@ -15,7 +15,7 @@ import TextShow (showt)
 import Builtins (mkBuiltins)
 import Eval (eval)
 import Parser (parseLine)
-import Types (Error(..), Eval, runEvalWithContext, Bubble(..), fromSymbol)
+import Types (Error(..), Eval, runEvalWithContext, Bubble(..), fromSymbol, renderTagName)
 
 tryError :: MonadError e m => m a -> m (Either e a)
 tryError act = fmap Right act `catchError` (pure . Left)
@@ -25,6 +25,8 @@ handleBubble h = \case
   Left (EvalError (Error e)) -> liftIO $ putStrLn $ Text.unpack e
   Left (ReturnFrom blockName _) -> liftIO $ putStrLn $ Text.unpack $
     "<toplevel>: error returning from block " <> showt (fromSymbol blockName) <> ": no such block in scope"
+  Left (TagGo tagName) -> liftIO $ putStrLn $ Text.unpack $
+    "<toplevel>: error going to tag " <> renderTagName tagName <> ": no such tag in scope"
   Right v -> h v
 
 main :: IO ()
