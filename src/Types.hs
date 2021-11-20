@@ -8,12 +8,11 @@
 module Types where
 
 import Control.Monad.Catch (MonadMask, MonadCatch, MonadThrow)
-import Control.Monad.Except ( throwError, ExceptT(ExceptT), runExceptT, MonadError )
+import Control.Monad.Except ( ExceptT(ExceptT), MonadError )
 import Control.Monad.IO.Class
-import Control.Monad.State ( MonadState )
-import Control.Monad.State.Strict (StateT (StateT), runStateT)
+import Control.Monad.Reader (ReaderT(..), MonadReader, local, ask)
 import Data.CaseInsensitive (CI, foldedCase, mk)
-import Data.IORef (IORef)
+import Data.IORef (IORef, readIORef, newIORef)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.String (IsString(..))
@@ -47,7 +46,7 @@ data Closure = Closure
   , closureParams :: [Symbol]
   , closureVarargs :: Maybe Symbol
   , closureBody :: [Expr]
-  , closureContext :: Context
+  , closureContext :: IORef Context
   }
 
 data Expr
@@ -135,16 +134,20 @@ instance Monoid Context where
 
 -- Eval
 
-newtype Eval a = Eval { getEval :: ExceptT Bubble (StateT Context IO) a }
-  deriving newtype (Functor, Applicative, Monad)
-  deriving newtype (MonadState Context, MonadError Bubble)
-  deriving newtype (MonadThrow, MonadCatch, MonadMask)
-  deriving newtype (MonadIO)
+newtype Eval a = Eval { runEval :: IORef Context -> IO (Either Bubble a) }
+  deriving
+    ( Functor, Applicative, Monad
+    , MonadReader (IORef Context), MonadError Bubble
+    , MonadThrow, MonadCatch, MonadMask
+    , MonadIO
+    )
+    via ReaderT (IORef Context) (ExceptT Bubble IO)
 
-runEvalWithContext :: Eval a -> Context -> IO (Either Bubble a, Context)
-runEvalWithContext (Eval x) ctx = flip runStateT ctx $ runExceptT x
+inContext :: IORef Context -> Eval a -> Eval a
+inContext ctx' = local (const ctx')
 
-localContext :: (Context -> Context) -> Eval a -> Eval a
-localContext f act = Eval $ ExceptT $ StateT $ \ctx -> do
-  (res, _) <- runEvalWithContext act (f ctx)
-  pure (res, ctx) -- discard result context and restore old context
+withLocalBindings :: Context -> Eval a -> Eval a
+withLocalBindings bindings act = do
+  ctx <- liftIO . readIORef =<< ask
+  ctx' <- liftIO $ newIORef $ ctx <> bindings
+  local (const ctx') act

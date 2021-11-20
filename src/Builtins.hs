@@ -10,7 +10,7 @@ import Control.Monad (foldM, zipWithM)
 import Control.Monad.IO.Class
 import Data.Bifunctor (second)
 import Data.Functor (($>))
-import Data.IORef (newIORef)
+import Data.IORef (newIORef, IORef)
 import Data.Map.Strict qualified as Map
 import Data.Text qualified as Text
 import TextShow (TextShow(..))
@@ -21,13 +21,11 @@ import Eval (apply, eval, setVar, nil)
 
 type Builtin = [Expr] -> Eval Expr
 
-mkBuiltins :: IO Context
-mkBuiltins = fmap (Context . Map.fromList) $ traverse ctxCell $ concat
-  [ builtinPrims
-  , builtinDefs
-  ]
-  where
-    ctxCell (name, bi) = (name,) <$> newIORef bi
+mkBuiltins :: IO (IORef Context)
+mkBuiltins = do
+  let ctxCell (name, bi) = (name,) <$> newIORef bi
+  cells <- traverse ctxCell (builtinPrims ++ builtinDefs)
+  newIORef $ Context $ Map.fromList cells
 
 builtinPrims :: [(Symbol, Expr)]
 builtinPrims = fmap (second LBuiltin)

@@ -15,7 +15,7 @@ import TextShow (showt)
 import Builtins (mkBuiltins)
 import Eval (eval)
 import Parser (parseLine)
-import Types (Error(..), Eval, runEvalWithContext, Bubble(..), fromSymbol, renderTagName)
+import Types (Error(..), Eval(..), Bubble(..), fromSymbol, renderTagName)
 
 tryError :: MonadError e m => m a -> m (Either e a)
 tryError act = fmap Right act `catchError` (pure . Left)
@@ -32,7 +32,7 @@ handleBubble h = \case
 main :: IO ()
 main = do
   builtins <- mkBuiltins
-  (res, _) <- flip runEvalWithContext builtins $ runInputT defaultSettings loop
+  res <- flip runEval builtins $ runInputT defaultSettings loop
   handleBubble (\_ -> pure ()) res
   where
     loop :: InputT Eval ()

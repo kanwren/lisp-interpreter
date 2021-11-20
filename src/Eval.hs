@@ -11,7 +11,7 @@ module Eval where
 import Control.Monad (unless)
 import Control.Monad.Except (catchError, throwError)
 import Control.Monad.IO.Class
-import Control.Monad.State (gets, get, put)
+import Control.Monad.Reader (ask)
 import Data.Foldable (foldlM)
 import Data.Functor ((<&>))
 import Data.IORef (newIORef, readIORef, writeIORef)
@@ -31,16 +31,17 @@ nil :: Expr
 nil = LList []
 
 mkContext :: [(Symbol, Expr)] -> Eval Context
-mkContext pairs = liftIO (Context . Map.fromList <$> traverse (\(x, y) -> newIORef y <&> (x,)) pairs)
+mkContext pairs = liftIO $ do
+  Context . Map.fromList <$> traverse (\(x, y) -> newIORef y <&> (x,)) pairs
 
 hasVar :: Symbol -> Eval Bool
 hasVar i = do
-  ctx <- gets getContext
+  Context ctx <- liftIO . readIORef =<< ask
   pure $ i `Map.member` ctx
 
 lookupVar :: Symbol -> Eval Expr
 lookupVar i = do
-  ctx <- gets getContext
+  Context ctx <- liftIO . readIORef =<< ask
   case ctx Map.!? i of
     Nothing -> evalError $ "variable not in scope: " <> fromSymbol i
     Just x  -> liftIO $ readIORef x
@@ -71,17 +72,18 @@ setVar :: Symbol -> Expr -> Eval ()
 setVar i val
   | i `Set.member` specialOps = evalError $ "error: " <> fromSymbol i <> " is a special operator and may not be overridden"
   | otherwise = do
-    ctx <- gets getContext
+    ctxVar <- ask
+    Context ctx <- liftIO $ readIORef ctxVar
     case ctx Map.!? i of
       Nothing -> do
         ref <- liftIO $ newIORef val
-        put $ Context $ Map.insert i ref ctx
+        liftIO $ writeIORef ctxVar $ Context $ Map.insert i ref ctx
       Just ref -> liftIO $ writeIORef ref val
 
 function :: Symbol -> Maybe Symbol -> Int -> [Expr] -> Eval Closure
 function opName name n args = case args of
   (params:body) -> do
-    context <- get
+    context <- ask
     let
       asSymbol :: Expr -> Eval Symbol
       asSymbol (LSymbol s) = pure s
@@ -242,7 +244,7 @@ eval (LList (f:args)) =
             getBinding (LSymbol name) = pure (name, nil)
             getBinding _ = evalError "let: invalid variable specification"
           binds <- mkContext =<< traverse getBinding xs
-          localContext (<> binds) $ progn body
+          withLocalBindings binds $ progn body
         _ -> evalError "let: invalid variable specification"
     LSymbol "defmacro" ->
       case args of
@@ -332,7 +334,7 @@ apply Closure{..} args = do
       | otherwise -> do
           let (mainArgs, restArgs) = splitAt expected args
           mkContext (zip closureParams mainArgs <> [(rest, LList restArgs)])
-  localContext (\c -> closureContext <> c <> binds) $ do
+  inContext closureContext $ withLocalBindings binds $ do
     progn closureBody `catchError` \case
       -- all (return-from)s need to be caught, or else we could bubble out of
       -- the current function! this is contrasted with `block`, which should
