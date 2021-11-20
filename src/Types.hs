@@ -20,6 +20,7 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import TextShow (TextShow(..))
 import TextShow qualified (fromText, unwordsB, FromTextShow(..))
+import qualified Data.Ratio as Ratio
 
 newtype Symbol = Symbol { getSymbol :: CI Text }
   deriving newtype (Eq, Ord, IsString)
@@ -52,6 +53,7 @@ data Closure = Closure
 
 data Expr
   = LInt Integer
+  | LRatio Rational
   | LBool Bool
   | LChar Char
   | LKeyword Keyword
@@ -67,6 +69,7 @@ data Expr
 renderType :: Expr -> Text
 renderType = \case
   LInt _ -> "int"
+  LRatio _ -> "ratio"
   LBool _ -> "bool"
   LChar _ -> "char"
   LKeyword _ -> "keyword"
@@ -87,9 +90,14 @@ renderChar = \case
   '\r' -> "#\\return"
   c -> "#\\" <> Text.singleton c
 
+renderRatio :: Rational -> Text
+renderRatio n = showt num <> "/" <> showt den
+  where (num, den) = (Ratio.numerator n, Ratio.denominator n)
+
 instance TextShow Expr where
   showb = \case
     LInt n -> showb n
+    LRatio n -> TextShow.fromText $ renderRatio n
     LBool False -> "#f"
     LBool True -> "#t"
     LChar c -> TextShow.fromText $ renderChar c
@@ -110,6 +118,7 @@ newtype Error = Error { getError :: Text }
 
 data TagName
   = TagInt Integer
+  | TagRatio Rational
   | TagSymbol Symbol
   | TagKeyword Keyword
   deriving (Eq, Ord)
@@ -117,6 +126,7 @@ data TagName
 renderTagName :: TagName -> Text
 renderTagName = \case
   TagInt n -> showt n
+  TagRatio n -> renderRatio n
   TagSymbol sym -> fromSymbol sym
   TagKeyword kw -> renderKeyword kw
 

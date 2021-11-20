@@ -3,13 +3,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Builtins (mkBuiltins) where
 
-import Control.Monad (foldM, zipWithM)
+import Control.Monad (zipWithM)
 import Control.Monad.IO.Class
 import Data.Bifunctor (second)
-import Data.Functor (($>))
+import Data.Functor (($>), (<&>))
 import Data.IORef (newIORef, IORef)
 import Data.Map.Strict qualified as Map
 import Data.Text qualified as Text
@@ -19,6 +20,8 @@ import Errors
 import Eval (apply, eval, setVar, nil, progn)
 import Parser (parseFile)
 import Types
+import Data.Ratio ((%))
+import Data.List (foldl', foldl1')
 
 type Builtin = [Expr] -> Eval Expr
 
@@ -34,6 +37,7 @@ builtinPrims = fmap (second LBuiltin)
   , ("-", isub)
   , ("*", imul)
   , ("/", idiv)
+  , ("//", iidiv)
   , ("mod", imod)
   , ("quot", iquot)
   , ("rem", irem)
@@ -59,52 +63,88 @@ builtinPrims = fmap (second LBuiltin)
   , ("string<", stringLt)
   , ("string>=", stringGe)
   , ("string<=", stringLe)
+  , ("type-of", typeOf)
   , ("print", printExpr)
   , ("load", load)
   ]
   where
-    intFold :: Symbol -> (b -> Integer -> b) -> b -> [Expr] -> Eval b
-    intFold name f = foldM go
+    asInts :: Symbol -> [Expr] -> Eval [Integer]
+    asInts name = go []
       where
-        go total (LInt n) = pure $ f total n
-        go _ e = evalError $ fromSymbol name <> ": not a number: " <> showt e
+        go acc [] = pure $ reverse acc
+        go acc (LInt x:xs) = go (x:acc) xs
+        go _ (e:_) = evalError $ fromSymbol name <> ": not a number: " <> renderType e
 
-    intFold1 :: Symbol -> (Integer -> Integer -> Integer) -> [Expr] -> Eval Expr
-    intFold1 name _ [] = evalError $ fromSymbol name <> ": expected at least 1 argument, got 0"
-    intFold1 name f (LInt x:xs) = LInt <$> intFold name f x xs
-    intFold1 name _ (x:_) = evalError $ fromSymbol name <> ": not a number: " <> showt x
+    toRatio :: Symbol -> Expr -> Eval Rational
+    toRatio _ (LInt n) = pure $ n % 1
+    toRatio _ (LRatio n) = pure n
+    toRatio name e = evalError $ fromSymbol name <> ": not a number: " <> renderType e
 
-    intFoldPairwise :: Symbol -> (b -> (Integer, Integer) -> b) -> b -> [Expr] -> Eval b
-    intFoldPairwise name _ _ [] = evalError $ fromSymbol name <> ": expected at least 1 argument, got 0"
-    intFoldPairwise name f z (LInt x:xs) = go z x xs
+    promote :: Symbol -> [Expr] -> Eval (Either [Rational] [Integer])
+    promote name = go []
       where
-        go total _ [] = pure total
-        go total prev (LInt y:ys) = go (f total (prev, y)) y ys
-        go _ _ (e:_) = evalError $ fromSymbol name <> ": not a number: " <> showt e
-    intFoldPairwise name _ _ (x:_) = evalError $ fromSymbol name <> ": not a number: " <> showt x
+        go :: [Integer] -> [Expr] -> Eval (Either [Rational] [Integer])
+        go acc [] = pure $ Right $ reverse acc
+        go acc (LInt x:xs) = go (x:acc) xs
+        go acc (LRatio x:xs) = do
+          rest <- traverse (toRatio name) xs
+          pure $ Left $ reverse (fmap (1 %) acc) ++ x:rest
+        go _ (e:_) = evalError $ fromSymbol name <> ": not a number: " <> renderType e
 
-    comparison :: Symbol -> (Integer -> Integer -> Bool) -> Builtin
-    comparison name f = fmap LBool . intFoldPairwise name (\b (x, y) -> b && f x y) True
+    iadd :: Builtin
+    iadd args = promote "+" args <&> \case
+      Left ratios -> LRatio $ foldl' (+) 0 ratios
+      Right ints -> LInt $ foldl' (+) 0 ints
 
-    iadd, isub, imul, idiv, imod, iquot, irem :: Builtin
-    iadd = fmap LInt . intFold "+" (+) 0
     -- unary should be negation
-    isub [LInt x] = pure $ LInt (-x)
-    isub args = intFold1 "-" (-) args
-    imul = fmap LInt . intFold "*" (*) 1
+    isub :: Builtin
+    isub args = promote "-" args <&> \case
+      Left [x] -> LRatio (-x)
+      Left xs -> LRatio $ foldl1' (-) xs
+      Right [x] -> LInt (-x)
+      Right xs -> LInt $ foldl1' (-) xs
+
+    imul :: Builtin
+    imul args = promote "*" args <&> \case
+      Left ratios -> LRatio $ foldl' (*) 1 ratios
+      Right ints -> LInt $ foldl' (*) 1 ints
+
     -- unary should be reciprocal
-    -- TODO: update once rationals are added
-    idiv [LInt x] = pure $ LInt (1 `div` x)
-    idiv args = intFold1 "/" div args
-    imod = intFold1 "mod" mod
-    iquot = intFold1 "quot" quot
-    irem = intFold1 "rem" rem
-    ieq = comparison "=" (==)
-    ine = comparison "/=" (/=)
-    igt = comparison ">" (>)
-    ilt = comparison "<" (<)
-    ige = comparison ">=" (>=)
-    ile = comparison "<=" (<=)
+    iidiv :: Builtin
+    iidiv args = asInts "//" args >>= \case
+      [x] -> pure $ LInt (1 `div` x)
+      [] -> numArgsAtLeast "//" 1 []
+      xs -> pure $ LInt $ foldl1' div xs
+
+    idiv :: Builtin
+    idiv args = traverse (toRatio "/") args >>= \case
+      [x] -> pure $ LRatio (1 / x)
+      [] -> numArgsAtLeast "/" 1 []
+      xs -> pure $ LRatio $ foldl1 (/) xs
+
+    imod, iquot, irem :: Builtin
+    imod args = asInts "mod" args >>= \case
+      [] -> numArgsAtLeast "mod" 1 []
+      xs -> pure $ LInt $ foldl1' mod xs
+    iquot args = asInts "quot" args >>= \case
+      [] -> numArgsAtLeast "quot" 1 []
+      xs -> pure $ LInt $ foldl1' quot xs
+    irem args = asInts "rem" args >>= \case
+      [] -> numArgsAtLeast "rem" 1 []
+      xs -> pure $ LInt $ foldl1' rem xs
+
+    comparison name rs is args = promote name args >>= \case
+      Left [] -> numArgsAtLeast name 1 []
+      Right [] -> numArgsAtLeast name 1 []
+      Left xs -> pure $ LBool $ and $ zipWith rs xs (tail xs)
+      Right xs -> pure $ LBool $ and $ zipWith is xs (tail xs)
+
+    ieq = comparison "=" (==) (==)
+    ine = comparison "/=" (/=) (/=)
+    igt = comparison ">" (>) (>)
+    ilt = comparison "<" (<) (<)
+    ige = comparison ">=" (>=) (>=)
+    ile = comparison "<=" (<=) (<=)
 
     primSet :: Builtin
     primSet [LSymbol name, value] = setVar name value $> value
@@ -185,6 +225,7 @@ builtinPrims = fmap (second LBuiltin)
       where
         equal' :: Expr -> Expr -> Eval Bool
         equal' (LInt x) (LInt y) = pure (x == y)
+        equal' (LRatio x) (LRatio y) = pure (x == y)
         equal' (LBool x) (LBool y) = pure (x == y)
         equal' (LChar x) (LChar y) = pure (x == y)
         equal' (LKeyword x) (LKeyword y) = pure (x == y)
@@ -205,6 +246,10 @@ builtinPrims = fmap (second LBuiltin)
     printExpr :: Builtin
     printExpr [e] = liftIO (print e) $> e
     printExpr args = numArgs "print" 1 args
+
+    typeOf :: Builtin
+    typeOf [v] = pure $ LString $ renderType v
+    typeOf args = numArgs "type-of" 1 args
 
     load :: Builtin
     load [LString path] = do

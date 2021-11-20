@@ -164,6 +164,7 @@ condition cond = truthy <$> eval cond
 
 eval :: Expr -> Eval Expr
 eval (LInt n) = pure $ LInt n
+eval (LRatio n) = pure $ LRatio n
 eval (LBool b) = pure $ LBool b
 eval (LChar b) = pure $ LChar b
 eval (LKeyword b) = pure $ LKeyword b
@@ -294,6 +295,7 @@ eval (LList (f:args)) =
         [LSymbol sym] -> throwError $ TagGo $ TagSymbol sym
         [LKeyword b] -> throwError $ TagGo $ TagKeyword b
         [LInt n] -> throwError $ TagGo $ TagInt n
+        [LRatio n] -> throwError $ TagGo $ TagRatio n
         [LList []] -> throwError $ TagGo $ TagSymbol "nil"
         [e] -> evalError $ "go: invalid tag type: " <> renderType e
         _ -> numArgs "go" 1 args
@@ -355,5 +357,4 @@ apply Closure{..} args = do
     matchParams' bs []     []          (Just r) as     = pure $ (r, LList as):bs
     matchParams' _  []     []          Nothing  (_:_)  = argsError -- too many args
     matchParams' bs []     []          Nothing  []     = pure bs
-
 

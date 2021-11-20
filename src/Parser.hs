@@ -14,6 +14,7 @@ import Text.Megaparsec.Char qualified as MC
 import Text.Megaparsec.Char.Lexer qualified as MCL
 
 import Types
+import Data.Ratio ((%))
 
 type Parser = M.Parsec Void String
 
@@ -34,11 +35,17 @@ pExpr = M.choice
   , pKeyword
   , pChar
   , pBool
-  , try pInt -- needed because of signs in numbers
+  -- try needed due to signs in numbers, '-5' is a number but '-a' is a symbol
+  , try pNumber
   , pSymbol
   ]
   where
-    pInt = label "int literal" $ LInt <$> MCL.signed (pure ()) MCL.decimal
+    pNumber = label "number literal" $ do
+      num <- MCL.signed (pure ()) MCL.decimal
+      denom <- optional $ MC.char '/' *> MCL.decimal
+      case denom of
+        Just d -> pure $ LRatio $ num % d
+        Nothing -> pure $ LInt num
     pBool = label "bool literal" $ fmap LBool $ (MC.string "#f" $> False) <|> (MC.string "#t" $> True)
     pChar = label "char literal" $ do
       void $ MC.string "#\\"
