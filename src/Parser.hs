@@ -80,7 +80,9 @@ pExpr = M.choice
     pList = label "list" $ do
       void $ symbol "("
       res <- M.sepEndBy (try pExpr) space
-      dotted <- optional $ symbol "." *> lexeme pExpr
+      dotted <- if not (null res)
+        then optional $ symbol "." *> lexeme pExpr
+        else pure Nothing
       void $ MC.char ')'
       case dotted of
         Nothing -> pure $ LList res
