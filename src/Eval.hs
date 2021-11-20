@@ -17,7 +17,7 @@ import Data.Functor ((<&>))
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Vector (Vector)
@@ -26,6 +26,7 @@ import TextShow (TextShow(..))
 
 import Types
 import Errors
+import Data.Text (Text)
 
 nil :: Expr
 nil = LList []
@@ -81,42 +82,46 @@ setVar i val
       Just ref -> liftIO $ writeIORef ref val
 
 function :: Symbol -> Maybe Symbol -> Int -> [Expr] -> Eval Closure
-function opName name n args = case args of
-  (params:body) -> do
-    context <- ask
-    let
-      asSymbol :: Expr -> Eval Symbol
-      asSymbol (LSymbol s) = pure s
-      asSymbol _ = evalError $ fromSymbol opName <> ": invalid argument list"
-    case params of
-      LList params' -> do
-        params'' <- traverse asSymbol params'
-        pure $ Closure
+function opName name n args =
+  case args of
+    (LList params:body) -> do
+      context <- ask
+      case parseArgs params of
+        Right (mainParams, optionals, rest) -> pure $ Closure
           { closureName = name
-          , closureParams = params''
-          , closureVarargs = Nothing
+          , closureParams = mainParams
+          , closureOptionalParams = optionals
+          , closureRest = rest
           , closureBody = body
           , closureContext = context
           }
-      LDottedList params' rest -> do
-        params'' <- traverse asSymbol params'
-        varargs <- asSymbol rest
-        pure $ Closure
-          { closureName = name
-          , closureParams = params''
-          , closureVarargs = Just varargs
-          , closureBody = body
-          , closureContext = context
-          }
-      LSymbol rest -> pure $ Closure
-        { closureName = name
-        , closureParams = []
-        , closureVarargs = Just rest
-        , closureBody = body
-        , closureContext = context
-        }
-      _ -> evalError $ fromSymbol opName <> ": invalid argument list"
-  _ -> numArgs opName n args
+        Left e -> throwError $ EvalError e
+    (_:_) -> evalError $ fromSymbol opName <> ": invalid parameter list"
+    _ -> numArgsAtLeast opName n args
+  where
+    toError :: Text -> Error
+    toError e = Error $ fromSymbol opName <> ": " <> e
+    parseArgs :: [Expr] -> Either Error ([Symbol], [(Symbol, Expr)], Maybe Symbol)
+    parseArgs = mainArgs []
+    -- Parse the main arguments from the parameter list
+    mainArgs ma []                         = pure (reverse ma, [], Nothing)
+    mainArgs ma (LSymbol "&optional":spec) = optionalArgs (reverse ma, []) spec
+    mainArgs ma (LSymbol "&rest":spec)     = restArgs (reverse ma, []) spec
+    mainArgs ma (LSymbol s:xs)             = mainArgs (s:ma) xs
+    mainArgs _  (x:_)                      = Left $ toError $ "invalid argument list: invalid parameter " <> showt x
+    -- Parse the optional arguments from the parameter list
+    optionalArgs (ma, oa) []                        = pure (ma, reverse oa, Nothing)
+    optionalArgs _        (LSymbol "&optional":_)   = Left $ toError "&optional not allowed here"
+    optionalArgs (ma, oa) (LSymbol "&rest":xs)      = restArgs (ma, reverse oa) xs
+    optionalArgs (ma, oa) (LSymbol s:xs)            = optionalArgs (ma, (s, nil):oa) xs
+    optionalArgs (ma, oa) (LList [LSymbol s]:xs)    = optionalArgs (ma, (s, nil):oa) xs
+    optionalArgs (ma, oa) (LList [LSymbol s, v]:xs) = optionalArgs (ma, (s, v):oa) xs
+    optionalArgs _        (e@(LList [_, _, _]):_)   = Left $ toError $ "invalid argument list: invalid parameter " <> showt e
+    optionalArgs _        (x:_)                     = Left $ toError $ "invalid argument list: invalid parameter " <> showt x
+    -- Parse the rest argument from the parameter list
+    restArgs (ma, oa) [] = pure (ma, oa, Nothing)
+    restArgs (ma, oa) [LSymbol s] = pure (ma, oa, Just s)
+    restArgs _ (_:_) = Left $ toError "invalid argument list: unexpected extra parameters"
 
 -- Evaluate a list of expressions and return the value of the final expression
 progn :: [Expr] -> Eval Expr
@@ -322,18 +327,7 @@ eval (LList (f:args)) =
 
 apply :: Closure -> [Expr] -> Eval Expr
 apply Closure{..} args = do
-  let got = length args
-      expected = length closureParams
-      name = fromMaybe "<anonymous>" closureName
-  binds <- case closureVarargs of
-    Nothing
-      | got /= expected -> numArgs name expected args
-      | otherwise -> mkContext (zip closureParams args)
-    Just rest
-      | got < expected -> numArgsAtLeast name expected args
-      | otherwise -> do
-          let (mainArgs, restArgs) = splitAt expected args
-          mkContext (zip closureParams mainArgs <> [(rest, LList restArgs)])
+  binds <- mkContext =<< matchParams closureParams closureOptionalParams closureRest args
   inContext closureContext $ withLocalBindings binds $ do
     progn closureBody `catchError` \case
       -- all (return-from)s need to be caught, or else we could bubble out of
@@ -344,4 +338,22 @@ apply Closure{..} args = do
         | otherwise -> evalError $ fromSymbol name <> ": error returning from block " <> showt (fromSymbol blockName) <> ": no such block in scope"
       TagGo tagName -> evalError $ fromSymbol name <> ": error going to tag " <> renderTagName tagName <> ": no such tag in scope"
       e -> throwError e
+  where
+    minLen = length closureParams
+    name = fromMaybe "<anonymous>" closureName
+    argsError =
+      if isJust closureRest
+      then numArgsAtLeast name minLen args
+      else numArgsBound name (minLen, minLen + length closureOptionalParams) args
+    matchParams :: [Symbol] -> [(Symbol, Expr)] -> Maybe Symbol -> [Expr] -> Eval [(Symbol, Expr)]
+    matchParams ps os r as = reverse <$> matchParams' [] ps os r as
+    matchParams' :: [(Symbol, Expr)] -> [Symbol] -> [(Symbol, Expr)] -> Maybe Symbol -> [Expr] -> Eval [(Symbol, Expr)]
+    matchParams' bs (m:ms) os          r        (a:as) = matchParams' ((m,a):bs) ms os r as
+    matchParams' _  (_:_)  _           _        []     = argsError -- not enough args
+    matchParams' bs []     ((o, _):os) r        (a:as) = matchParams' ((o,a):bs) [] os r as
+    matchParams' bs []     ((o, v):os) r        []     = matchParams' ((o, v):bs) [] os r []
+    matchParams' bs []     []          (Just r) as     = pure $ (r, LList as):bs
+    matchParams' _  []     []          Nothing  (_:_)  = argsError -- too many args
+    matchParams' bs []     []          Nothing  []     = pure bs
+
 

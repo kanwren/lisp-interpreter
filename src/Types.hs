@@ -43,8 +43,9 @@ renderKeyword = \case
 
 data Closure = Closure
   { closureName :: Maybe Symbol
-  , closureParams :: [Symbol]
-  , closureVarargs :: Maybe Symbol
+  , closureParams :: [Symbol] -- name
+  , closureOptionalParams :: [(Symbol, Expr)] -- name and default value (nil if unspecified)
+  , closureRest :: Maybe Symbol -- name
   , closureBody :: [Expr]
   , closureContext :: IORef Context
   }
