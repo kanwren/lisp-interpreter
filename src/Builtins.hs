@@ -15,9 +15,10 @@ import Data.Map.Strict qualified as Map
 import Data.Text qualified as Text
 import TextShow (TextShow(..))
 
-import Types
 import Errors
-import Eval (apply, eval, setVar, nil)
+import Eval (apply, eval, setVar, nil, progn)
+import Parser (parseFile)
+import Types
 
 type Builtin = [Expr] -> Eval Expr
 
@@ -59,6 +60,7 @@ builtinPrims = fmap (second LBuiltin)
   , ("string>=", stringGe)
   , ("string<=", stringLe)
   , ("print", printExpr)
+  , ("load", load)
   ]
   where
     intFold :: Symbol -> (b -> Integer -> b) -> b -> [Expr] -> Eval b
@@ -203,6 +205,15 @@ builtinPrims = fmap (second LBuiltin)
     printExpr :: Builtin
     printExpr [e] = liftIO (print e) $> e
     printExpr args = numArgs "print" 1 args
+
+    load :: Builtin
+    load [LString path] = do
+      contents <- liftIO $ readFile $ Text.unpack path
+      case parseFile contents of
+        Right res -> progn res
+        Left e -> evalError $ "load: parse error: " <> Text.pack e
+    load [e] = evalError $ "load: expected string as path, but got " <> renderType e
+    load args = numArgs "load" 1 args
 
 builtinDefs :: [(Symbol, Expr)]
 builtinDefs =

@@ -1,7 +1,7 @@
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Parser (parseLine) where
+module Parser (parseLine, parseFile) where
 
 import Control.Arrow (left)
 import Control.Monad (void)
@@ -75,4 +75,11 @@ pExpr = M.choice
         Just end -> pure $ LDottedList res end
 
 parseLine :: String -> Either String (Maybe Expr)
-parseLine input = left errorBundlePretty $ M.parse (space *> optional (lexeme pExpr) <* M.eof) "repl" input
+parseLine = left errorBundlePretty . M.parse (space *> optional (lexeme pExpr) <* M.eof) "repl"
+
+pFile :: Parser [Expr]
+pFile = space *> M.many (lexeme pExpr) <* M.eof
+
+parseFile :: String -> Either String [Expr]
+parseFile = left errorBundlePretty . M.parse pFile "load"
+
