@@ -50,6 +50,7 @@ builtinPrims = fmap (second LBuiltin)
   , ("<", ilt)
   , (">=", ige)
   , ("<=", ile)
+  , ("not", primNot)
   , ("equal", equal)
   , ("set", primSet)
   , ("eval", primEval)
@@ -232,6 +233,11 @@ builtinPrims = fmap (second LBuiltin)
     stringLt = stringComparison "string<" (<)
     stringGe = stringComparison "string>=" (<=)
     stringLe = stringComparison "string<=" (<=)
+
+    primNot :: Builtin
+    primNot [LBool False] = pure $ LBool True
+    primNot [_] = pure $ LBool False
+    primNot args = numArgs "not" 1 args
 
     equal :: Builtin
     equal args =
