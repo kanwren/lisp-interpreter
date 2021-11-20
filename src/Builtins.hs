@@ -22,6 +22,7 @@ import Parser (parseFile)
 import Types
 import Data.Ratio ((%))
 import Data.List (foldl', foldl1')
+import qualified System.Exit as Exit
 
 type Builtin = [Expr] -> Eval Expr
 
@@ -37,7 +38,7 @@ builtinPrims = fmap (second LBuiltin)
   , ("-", isub)
   , ("*", imul)
   , ("/", idiv)
-  , ("//", iidiv)
+  , ("div", iidiv)
   , ("mod", imod)
   , ("quot", iquot)
   , ("rem", irem)
@@ -66,6 +67,7 @@ builtinPrims = fmap (second LBuiltin)
   , ("type-of", typeOf)
   , ("print", printExpr)
   , ("load", load)
+  , ("exit", exit)
   ]
   where
     asInts :: Symbol -> [Expr] -> Eval [Integer]
@@ -111,9 +113,9 @@ builtinPrims = fmap (second LBuiltin)
 
     -- unary should be reciprocal
     iidiv :: Builtin
-    iidiv args = asInts "//" args >>= \case
+    iidiv args = asInts "div" args >>= \case
       [x] -> pure $ LInt (1 `div` x)
-      [] -> numArgsAtLeast "//" 1 []
+      [] -> numArgsAtLeast "div" 1 []
       xs -> pure $ LInt $ foldl1' div xs
 
     idiv :: Builtin
@@ -259,6 +261,11 @@ builtinPrims = fmap (second LBuiltin)
         Left e -> evalError $ "load: parse error: " <> Text.pack e
     load [e] = evalError $ "load: expected string as path, but got " <> renderType e
     load args = numArgs "load" 1 args
+
+    exit :: Builtin
+    exit [] = liftIO Exit.exitSuccess
+    exit [LInt n] = liftIO $ Exit.exitWith $ Exit.ExitFailure (fromIntegral n)
+    exit args = numArgsBound "exit" (0, 1) args
 
 builtinDefs :: [(Symbol, Expr)]
 builtinDefs =

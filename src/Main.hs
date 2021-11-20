@@ -38,7 +38,6 @@ main = do
     loop :: InputT Eval ()
     loop = getInputLine "> " >>= \case
       Nothing -> pure ()
-      Just ":q" -> pure ()
       Just line -> do
         -- TODO: resume!
         case parseLine line of
