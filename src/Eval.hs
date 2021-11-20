@@ -186,7 +186,7 @@ eval (LList (f:args)) =
     LSymbol "and" -> do
       let
         go [] = pure $ LBool True
-        go [x] = pure x
+        go [x] = eval x
         go (x:xs) = do
           x' <- condition x
           if x'
