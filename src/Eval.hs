@@ -141,9 +141,9 @@ buildTagTable = fmap collect . foldlM go (0, mempty, mempty)
       LInt n -> pure (i, Map.insert (TagInt n) i tagTable, exprs)
       -- NIL symbol
       LList [] -> pure (i, Map.insert (TagSymbol "nil") i tagTable, exprs)
-      -- sexprs
-      sx@(LList _) -> pure (i + 1, tagTable, sx:exprs)
-      sx@(LDottedList _ _) -> pure (i + 1, tagTable, sx:exprs)
+      -- lists
+      l@(LList _) -> pure (i + 1, tagTable, l:exprs)
+      l@(LDottedList _ _) -> pure (i + 1, tagTable, l:exprs)
       e -> evalError $ "tagbody: invalid tag or form type: " <> renderType e
 
 block :: Symbol -> Eval Expr -> Eval Expr
@@ -323,7 +323,7 @@ eval (LList (f:args)) =
       LBuiltin f' -> f' =<< traverse eval args
       LFun f' -> apply f' =<< traverse eval args
       LMacro m -> eval =<< apply m args
-      e -> evalError $ "expected function in s-expr: " <> showt e
+      e -> evalError $ "expected function in call: " <> showt e
 
 apply :: Closure -> [Expr] -> Eval Expr
 apply Closure{..} args = do
