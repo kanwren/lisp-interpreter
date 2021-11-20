@@ -15,14 +15,14 @@ import Data.IORef (newIORef, IORef)
 import Data.Map.Strict qualified as Map
 import Data.Text qualified as Text
 import TextShow (TextShow(..))
+import Data.Ratio ((%), numerator, denominator)
+import Data.List (foldl', foldl1')
+import System.Exit qualified as Exit
 
 import Errors
 import Eval (apply, eval, setVar, nil, progn)
 import Parser (parseFile)
 import Types
-import Data.Ratio ((%))
-import Data.List (foldl', foldl1')
-import qualified System.Exit as Exit
 
 type Builtin = [Expr] -> Eval Expr
 
@@ -42,6 +42,8 @@ builtinPrims = fmap (second LBuiltin)
   , ("mod", imod)
   , ("quot", iquot)
   , ("rem", irem)
+  , ("numerator", primNumerator)
+  , ("denominator", primDenominator)
   , ("=", ieq)
   , ("/=", ine)
   , (">", igt)
@@ -134,6 +136,18 @@ builtinPrims = fmap (second LBuiltin)
     irem args = asInts "rem" args >>= \case
       [] -> numArgsAtLeast "rem" 1 []
       xs -> pure $ LInt $ foldl1' rem xs
+
+    primNumerator :: Builtin
+    primNumerator [LInt n] = pure $ LInt n
+    primNumerator [LRatio n] = pure $ LInt $ numerator n
+    primNumerator [e] = evalError $ "numerator: not a ratio: " <> renderType e
+    primNumerator args = numArgs "numerator" 1 args
+
+    primDenominator :: Builtin
+    primDenominator [LInt _] = pure $ LInt 1
+    primDenominator [LRatio n] = pure $ LInt $ denominator n
+    primDenominator [e] = evalError $ "denominator: not a ratio: " <> renderType e
+    primDenominator args = numArgs "denominator" 1 args
 
     comparison name rs is args = promote name args >>= \case
       Left [] -> numArgsAtLeast name 1 []
