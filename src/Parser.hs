@@ -34,38 +34,43 @@ pExpr = M.choice
   , pKeyword
   , pChar
   , pBool
-  , try pInt <|> pSymbol -- needed because of signs in numbers
+  , try pInt -- needed because of signs in numbers
+  , pSymbol
   ]
   where
-    pInt = LInt <$> MCL.signed (pure ()) MCL.decimal
-    pBool = fmap LBool $ (MC.string "#f" $> False) <|> (MC.string "#t" $> True)
-    pChar = try pSpecialChar <|> pAnyChar
-    pSpecialChar = fmap LChar $ MC.string "#\\" *> M.choice
+    pInt = label "int literal" $ LInt <$> MCL.signed (pure ()) MCL.decimal
+    pBool = label "bool literal" $ fmap LBool $ (MC.string "#f" $> False) <|> (MC.string "#t" $> True)
+    pChar = label "char literal" $ do
+      void $ MC.string "#\\"
+      try pSpecialChar <|> pAnyChar <?> "char name"
+    pSpecialChar = LChar <$> M.choice
       [ "space" $> ' '
       , "tab" $> '\t'
       , "newline" $> '\n'
       , "return" $> '\r'
       ]
-    pAnyChar = LChar <$> (MC.string "#\\" *> M.anySingle)
-    pKeyword = MC.char ':' *> M.choice
+    pAnyChar = LChar <$> M.anySingle
+    pKeyword = label "keyword" $ MC.char ':' *> M.choice
       [ MC.char '|' *> (LKeyword . ArbKeyword . Text.pack <$> M.manyTill (try (MC.string "\\|" $> '|') <|> MCL.charLiteral) (MC.char '|'))
       , LKeyword . SymKeyword . mkSymbol <$> pIdent -- TODO: this is kinda a hack
       ]
-    pString = LString . Text.pack <$> (MC.char '"' *> M.manyTill MCL.charLiteral (MC.char '"'))
-    pIdent = do
+    pString = label "string literal" $ LString . Text.pack <$> (MC.char '"' *> M.manyTill MCL.charLiteral (MC.char '"'))
+    pIdent = label "identifier" $ do
       let idChar = MC.letterChar <|> M.oneOf ("+-*/!$%&|:<=>?@^_~." :: String)
+            <?> "identifier first char"
       let idTailChar = idChar <|> MC.numberChar <|> M.oneOf ("#" :: String)
+            <?> "identifier char"
       first <- idChar
       rest <- do
         if first == '.'
         then M.some idTailChar
         else M.many idTailChar
       pure $ Text.pack $ first:rest
-    pSymbol = LSymbol . mkSymbol <$> pIdent
-    pQuote = MC.char '\'' *> do
+    pSymbol = label "keyword" $ LSymbol . mkSymbol <$> pIdent
+    pQuote = label "quoted expression" $ MC.char '\'' *> do
       e <- pExpr
       pure $ LList [LSymbol "quote", e]
-    pList = do
+    pList = label "list" $ do
       void $ symbol "("
       res <- M.sepEndBy (try pExpr) space
       dotted <- optional $ symbol "." *> lexeme pExpr
