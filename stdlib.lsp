@@ -1,3 +1,20 @@
+(defun foldr (f z xs)
+  (if (null xs)
+    z
+    (f (car xs) (foldr f z (cdr xs)))))
+
+; TODO: use defconst when implemented
+(defvar otherwise #t)
+
+(defmacro cond (&rest conds)
+  (foldr
+    (lambda (clause1 rest)
+      (list 'if
+            (car clause1)
+            (cons 'progn (cdr clause1))
+            rest))
+    nil conds))
+
 (defmacro while (cond &rest body)
   (list 'block nil
         (list 'tagbody
