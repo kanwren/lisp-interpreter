@@ -86,6 +86,7 @@ pExpr = M.choice
       void $ MC.char ')'
       case dotted of
         Nothing -> pure $ LList res
+        Just (LList xs) -> pure $ LList (res ++ xs)
         Just end -> pure $ LDottedList res end
 
 parseLine :: String -> Either String (Maybe Expr)
