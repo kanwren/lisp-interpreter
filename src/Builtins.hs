@@ -12,12 +12,12 @@ import Control.Monad.IO.Class
 import Data.Bifunctor (second)
 import Data.Functor (($>), (<&>))
 import Data.IORef (newIORef, IORef)
-import Data.Map.Strict qualified as Map
-import Data.Text qualified as Text
-import TextShow (TextShow(..))
-import Data.Ratio ((%), numerator, denominator)
 import Data.List (foldl', foldl1')
+import Data.Map.Strict qualified as Map
+import Data.Ratio ((%), numerator, denominator)
+import Data.Text qualified as Text
 import System.Exit qualified as Exit
+import TextShow (TextShow(..))
 
 import Errors
 import Eval (apply, eval, setVar, nil, progn)
@@ -270,7 +270,7 @@ builtinPrims = fmap (second LBuiltin)
     printExpr args = numArgs "print" 1 args
 
     typeOf :: Builtin
-    typeOf [v] = pure $ LString $ renderType v
+    typeOf [v] = pure $ LSymbol $ typeToSymbol v
     typeOf args = numArgs "type-of" 1 args
 
     load :: Builtin

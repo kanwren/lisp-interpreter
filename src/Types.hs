@@ -15,12 +15,12 @@ import Data.CaseInsensitive (CI, foldedCase, mk)
 import Data.IORef (IORef, readIORef, newIORef)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
+import Data.Ratio qualified as Ratio
 import Data.String (IsString(..))
 import Data.Text (Text)
 import Data.Text qualified as Text
 import TextShow (TextShow(..))
 import TextShow qualified (fromText, unwordsB, FromTextShow(..))
-import qualified Data.Ratio as Ratio
 
 newtype Symbol = Symbol { getSymbol :: CI Text }
   deriving newtype (Eq, Ord, IsString)
@@ -47,6 +47,7 @@ data Closure = Closure
   , closureParams :: [Symbol] -- name
   , closureOptionalParams :: [(Symbol, Expr)] -- name and default value (nil if unspecified)
   , closureRest :: Maybe Symbol -- name
+  , closureKeywordParams :: Map Symbol Expr -- name and default value (nil if unspecified)
   , closureBody :: [Expr]
   , closureContext :: IORef Context
   }
@@ -67,15 +68,18 @@ data Expr
   deriving Show via (TextShow.FromTextShow Expr)
 
 renderType :: Expr -> Text
-renderType = \case
-  LInt _ -> "int"
+renderType = fromSymbol . typeToSymbol
+
+typeToSymbol :: Expr -> Symbol
+typeToSymbol = \case
+  LInt _ -> "integer"
   LRatio _ -> "ratio"
   LBool _ -> "bool"
   LChar _ -> "char"
   LKeyword _ -> "keyword"
   LString _ -> "string"
   LSymbol _ -> "symbol"
-  LList [] -> "nil"
+  LList [] -> "null"
   LList _ -> "cons"
   LDottedList _ _ -> "cons"
   LBuiltin _ -> "function"

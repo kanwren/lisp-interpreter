@@ -1,8 +1,7 @@
 - Common Lisp has that `()` and `'nil` always act the same, including `(block nil (return-from ()))` and so on
   - Currently, only `(return-from ())` -> `(return-from nil)` rewriting is supported
 - Loops!
-- Tail recursion
-- Keyword arguments with `&key` and keywords
+- Tail call optimization
 - `defconst`
 - `flet`, `labels`, `macrolet`
 - Move some things into a standard library:

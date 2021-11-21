@@ -5,11 +5,11 @@
 module Main where
 
 import Control.Monad.Error.Class (catchError)
+import Control.Monad.Except (MonadError)
 import Control.Monad.IO.Class
 import Control.Monad.Trans (lift)
 import Data.Text qualified as Text
 import System.Console.Haskeline (InputT, runInputT, defaultSettings, getInputLine)
-import Control.Monad.Except (MonadError)
 import TextShow (showt)
 
 import Builtins (mkBuiltins)

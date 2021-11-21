@@ -6,6 +6,7 @@ module Parser (parseLine, parseFile) where
 import Control.Arrow (left)
 import Control.Monad (void)
 import Data.Functor (($>))
+import Data.Ratio ((%))
 import Data.Text qualified as Text
 import Data.Void (Void)
 import Text.Megaparsec
@@ -14,7 +15,6 @@ import Text.Megaparsec.Char qualified as MC
 import Text.Megaparsec.Char.Lexer qualified as MCL
 
 import Types
-import Data.Ratio ((%))
 
 type Parser = M.Parsec Void String
 

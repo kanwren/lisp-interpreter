@@ -20,13 +20,13 @@ import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe, isJust)
 import Data.Set (Set)
 import Data.Set qualified as Set
+import Data.Text (Text)
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import TextShow (TextShow(..))
 
-import Types
 import Errors
-import Data.Text (Text)
+import Types
 
 nil :: Expr
 nil = LList []
@@ -87,11 +87,12 @@ function opName name n args =
     (LList params:body) -> do
       context <- ask
       case parseArgs params of
-        Right (mainParams, optionals, rest) -> pure $ Closure
+        Right (mainParams, optionals, rest, keywordParams) -> pure Closure
           { closureName = name
           , closureParams = mainParams
           , closureOptionalParams = optionals
           , closureRest = rest
+          , closureKeywordParams = keywordParams
           , closureBody = body
           , closureContext = context
           }
@@ -101,27 +102,45 @@ function opName name n args =
   where
     toError :: Text -> Error
     toError e = Error $ fromSymbol opName <> ": " <> e
-    parseArgs :: [Expr] -> Either Error ([Symbol], [(Symbol, Expr)], Maybe Symbol)
+    parseArgs :: [Expr] -> Either Error ([Symbol], [(Symbol, Expr)], Maybe Symbol, Map Symbol Expr)
     parseArgs = mainArgs []
     -- Parse the main arguments from the parameter list
-    mainArgs ma []                         = pure (reverse ma, [], Nothing)
+    mainArgs :: [Symbol] -> [Expr] -> Either Error ([Symbol], [(Symbol, Expr)], Maybe Symbol, Map Symbol Expr)
+    mainArgs ma []                         = pure (reverse ma, [], Nothing, mempty)
     mainArgs ma (LSymbol "&optional":spec) = optionalArgs (reverse ma, []) spec
     mainArgs ma (LSymbol "&rest":spec)     = restArgs (reverse ma, []) spec
+    mainArgs ma (LSymbol "&key":spec)      = keyArgs (reverse ma, [], Nothing, mempty) spec
     mainArgs ma (LSymbol s:xs)             = mainArgs (s:ma) xs
     mainArgs _  (x:_)                      = Left $ toError $ "invalid argument list: invalid parameter " <> showt x
     -- Parse the optional arguments from the parameter list
-    optionalArgs (ma, oa) []                        = pure (ma, reverse oa, Nothing)
+    optionalArgs :: ([Symbol], [(Symbol, Expr)]) -> [Expr] -> Either Error ([Symbol], [(Symbol, Expr)], Maybe Symbol, Map Symbol Expr)
+    optionalArgs (ma, oa) []                        = pure (ma, reverse oa, Nothing, mempty)
     optionalArgs _        (LSymbol "&optional":_)   = Left $ toError "&optional not allowed here"
-    optionalArgs (ma, oa) (LSymbol "&rest":xs)      = restArgs (ma, reverse oa) xs
+    optionalArgs (ma, oa) (LSymbol "&rest":spec)    = restArgs (ma, reverse oa) spec
+    optionalArgs (ma, oa) (LSymbol "&key":spec)     = keyArgs (ma, reverse oa, Nothing, mempty) spec
     optionalArgs (ma, oa) (LSymbol s:xs)            = optionalArgs (ma, (s, nil):oa) xs
     optionalArgs (ma, oa) (LList [LSymbol s]:xs)    = optionalArgs (ma, (s, nil):oa) xs
     optionalArgs (ma, oa) (LList [LSymbol s, v]:xs) = optionalArgs (ma, (s, v):oa) xs
-    optionalArgs _        (e@(LList [_, _, _]):_)   = Left $ toError $ "invalid argument list: invalid parameter " <> showt e
     optionalArgs _        (x:_)                     = Left $ toError $ "invalid argument list: invalid parameter " <> showt x
     -- Parse the rest argument from the parameter list
-    restArgs (ma, oa) [] = pure (ma, oa, Nothing)
-    restArgs (ma, oa) [LSymbol s] = pure (ma, oa, Just s)
-    restArgs _ (_:_) = Left $ toError "invalid argument list: unexpected extra parameters"
+    restArgs :: ([Symbol], [(Symbol, Expr)]) -> [Expr] -> Either Error ([Symbol], [(Symbol, Expr)], Maybe Symbol, Map Symbol Expr)
+    restArgs (ma, oa) []                               = pure (ma, oa, Nothing, mempty)
+    restArgs _        [LSymbol "&optional"]            = Left $ toError "&optional not allowed here"
+    restArgs _        [LSymbol "&rest"]                = Left $ toError "&rest not allowed here"
+    restArgs (ma, oa) [LSymbol s]                      = pure (ma, oa, Just s, mempty)
+    restArgs (ma, oa) (LSymbol s:LSymbol "&key":rest)  = keyArgs (ma, oa, Just s, mempty) rest
+    restArgs _        (LSymbol _:x:_)                  = Left $ toError $ "unexpected extra argument after rest parameter: " <> showt x
+    restArgs _        (x:_)                            = Left $ toError $ "invalid argument list: invalid parameter " <> showt x
+    -- Parse the key arguments from the parameter list
+    keyArgs :: ([Symbol], [(Symbol, Expr)], Maybe Symbol, Map Symbol Expr) -> [Expr] -> Either Error ([Symbol], [(Symbol, Expr)], Maybe Symbol, Map Symbol Expr)
+    keyArgs (ma, oa, r, ka) []                         = pure (ma, oa, r, ka)
+    keyArgs _               (LSymbol "&optional":_)    = Left $ toError "&optional not allowed here"
+    keyArgs _               (LSymbol "&rest":_)        = Left $ toError "&rest not allowed here"
+    keyArgs _               (LSymbol "&key":_)         = Left $ toError "&key not allowed here"
+    keyArgs (ma, oa, r, ka) (LSymbol s:xs)             = keyArgs (ma, oa, r, Map.insert s nil ka) xs
+    keyArgs (ma, oa, r, ka) (LList [LSymbol s]:xs)     = keyArgs (ma, oa, r, Map.insert s nil ka) xs
+    keyArgs (ma, oa, r, ka) (LList [LSymbol s, v]:xs)  = keyArgs (ma, oa, r, Map.insert s v ka) xs
+    keyArgs _               (x:_)                      = Left $ toError $ "invalid argument list: invalid parameter " <> showt x
 
 -- Evaluate a list of expressions and return the value of the final expression
 progn :: [Expr] -> Eval Expr
@@ -329,7 +348,7 @@ eval (LList (f:args)) =
 
 apply :: Closure -> [Expr] -> Eval Expr
 apply Closure{..} args = do
-  binds <- mkContext =<< matchParams closureParams closureOptionalParams closureRest args
+  binds <- mkContext =<< matchParams closureParams closureOptionalParams closureRest closureKeywordParams args
   inContext closureContext $ withLocalBindings binds $ do
     progn closureBody `catchError` \case
       -- all (return-from)s need to be caught, or else we could bubble out of
@@ -347,14 +366,27 @@ apply Closure{..} args = do
       if isJust closureRest
       then numArgsAtLeast name minLen args
       else numArgsBound name (minLen, minLen + length closureOptionalParams) args
-    matchParams :: [Symbol] -> [(Symbol, Expr)] -> Maybe Symbol -> [Expr] -> Eval [(Symbol, Expr)]
-    matchParams ps os r as = reverse <$> matchParams' [] ps os r as
-    matchParams' :: [(Symbol, Expr)] -> [Symbol] -> [(Symbol, Expr)] -> Maybe Symbol -> [Expr] -> Eval [(Symbol, Expr)]
-    matchParams' bs (m:ms) os          r        (a:as) = matchParams' ((m,a):bs) ms os r as
-    matchParams' _  (_:_)  _           _        []     = argsError -- not enough args
-    matchParams' bs []     ((o, _):os) r        (a:as) = matchParams' ((o,a):bs) [] os r as
-    matchParams' bs []     ((o, v):os) r        []     = matchParams' ((o, v):bs) [] os r []
-    matchParams' bs []     []          (Just r) as     = pure $ (r, LList as):bs
-    matchParams' _  []     []          Nothing  (_:_)  = argsError -- too many args
-    matchParams' bs []     []          Nothing  []     = pure bs
+    matchParams :: [Symbol] -> [(Symbol, Expr)] -> Maybe Symbol -> Map Symbol Expr -> [Expr] -> Eval [(Symbol, Expr)]
+    matchParams ps os r ks as = reverse <$> matchParams' [] ps os r ks as
+    matchParams' :: [(Symbol, Expr)] -> [Symbol] -> [(Symbol, Expr)] -> Maybe Symbol -> Map Symbol Expr -> [Expr] -> Eval [(Symbol, Expr)]
+    matchParams' bs (m:ms) os          r        ks (a:as) = matchParams' ((m,a):bs) ms os r ks as
+    matchParams' _  (_:_)  _           _        _  []     = argsError -- not enough args
+    matchParams' bs []     ((o, _):os) r        ks (a:as) = matchParams' ((o,a):bs) [] os r ks as
+    matchParams' bs []     ((o, v):os) r        ks []     = matchParams' ((o, v):bs) [] os r ks []
+    matchParams' bs []     []          (Just r) ks as     = (((r, LList as):bs) ++) <$> matchParamsKeywords ks as
+    matchParams' bs []     []          Nothing  ks as
+      | not (null as) && null ks = argsError -- better error messages when no keyword args and too many parameters
+      | otherwise = (bs ++) <$> matchParamsKeywords ks as
+    -- TODO: match keywords, generate bindings for everything in map, error if
+    -- there are just too many parameters (function calls with too many
+    -- parameters get passed here)
+    matchParamsKeywords :: Map Symbol Expr -> [Expr] -> Eval [(Symbol, Expr)]
+    matchParamsKeywords = go
+      where
+        go res [] = pure $ Map.assocs res
+        go res (LKeyword k@(SymKeyword s):v:rest)
+          | s `Map.member` res = go (Map.insert s v res) rest
+          | otherwise = evalError $ fromSymbol name <> ": unexpected keyword: " <> renderKeyword k
+        go _ (LKeyword _:_) = evalError $ fromSymbol name <> ": expected value for keyword argument"
+        go _ (x:_) = evalError $ fromSymbol name <> ": unexpected parameter in keyword arguments: " <> showt x
 
