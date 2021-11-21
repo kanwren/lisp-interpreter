@@ -416,7 +416,9 @@ apply Closure{..} args = do
     matchParams' _  (_:_)  _           _        _  []     = argsError -- not enough args
     matchParams' bs []     ((o, _):os) r        ks (a:as) = matchParams' ((o,a):bs) [] os r ks as
     matchParams' bs []     ((o, v):os) r        ks []     = matchParams' ((o, v):bs) [] os r ks []
-    matchParams' bs []     []          (Just r) ks as     = (((r, LList as):bs) ++) <$> matchParamsKeywords ks as
+    matchParams' bs []     []          (Just r) ks as
+      | null ks = pure $ (r, LList as):bs
+      | otherwise = (((r, LList as):bs) ++) <$> matchParamsKeywords ks as
     matchParams' bs []     []          Nothing  ks as
       | not (null as) && null ks = argsError -- better error messages when no keyword args and too many parameters
       | otherwise = (bs ++) <$> matchParamsKeywords ks as
