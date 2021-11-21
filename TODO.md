@@ -5,5 +5,4 @@
 - `defconst`
 - `flet`, `labels`, `macrolet`
 - Move some things into a standard library:
-  - `(defmacro return (&optional val) (list 'return-from nil val))`
   - `(defun list (&rest xs) xs)`
