@@ -20,7 +20,7 @@ import System.Exit qualified as Exit
 import TextShow (TextShow(..))
 
 import Errors
-import Eval (apply, eval, setVar, nil, progn)
+import Eval (apply, eval, setVar, nil, progn, typep)
 import Parser (parseFile)
 import Types
 
@@ -289,7 +289,7 @@ builtinPrims = fmap (second LBuiltin)
 
 builtinPreds :: [(Symbol, Expr)]
 builtinPreds =
-  [ ("typep", LBuiltin typep)
+  [ ("typep", LBuiltin primTypep)
   , ("numberp", LBuiltin (typePred "numberp" "number"))
   , ("integerp", LBuiltin (typePred "integerp" "integer"))
   , ("ratiop", LBuiltin (typePred "ratiop" "ratio"))
@@ -306,20 +306,14 @@ builtinPreds =
   , ("macrop", LBuiltin (typePred "macrop" "macro"))
   ]
   where
-    typep' :: Expr -> Symbol -> Eval Bool
-    typep' v s =
-      case symbolToTypePred s of
-        Just p  -> pure $ p v
-        Nothing -> evalError "typep: invalid type specified"
-
-    typep :: Builtin
-    typep [v, LSymbol s] = LBool <$> typep' v s
-    typep [_, _] = evalError "typep: invalid type specified"
-    typep args = numArgs "typep" 2 args
+    primTypep :: Builtin
+    primTypep [v, LSymbol s] = LBool <$> typep "typep" v s
+    primTypep [_, _] = evalError "typep: invalid type specifier"
+    primTypep args = numArgs "typep" 2 args
 
     typePred :: Symbol -> Symbol -> Builtin
     typePred name s = \case
-      [v] -> LBool <$> typep' v s
+      [v] -> LBool <$> typep name v s
       args -> numArgs name 1 args
 
 builtinDefs :: [(Symbol, Expr)]

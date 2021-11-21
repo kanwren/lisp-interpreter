@@ -52,6 +52,7 @@ specialOps = Set.fromList
   [ "if"
   , "and"
   , "or"
+  , "the"
   , "setq"
   , "defvar"
   , "defparameter"
@@ -142,6 +143,12 @@ function opName name n args =
     keyArgs (ma, oa, r, ka) (LList [LSymbol s, v]:xs)  = keyArgs (ma, oa, r, Map.insert s v ka) xs
     keyArgs _               (x:_)                      = Left $ toError $ "invalid argument list: invalid parameter " <> showt x
 
+typep :: Symbol -> Expr -> Symbol -> Eval Bool
+typep name v s =
+  case symbolToTypePred s of
+    Just p  -> pure $ p v
+    Nothing -> evalError $ fromSymbol name <> ": invalid type specifier"
+
 -- Evaluate a list of expressions and return the value of the final expression
 progn :: [Expr] -> Eval Expr
 progn [] = pure nil
@@ -222,7 +229,16 @@ eval (LList (f:args)) =
           then pure x'
           else go xs
       go args
-    -- NOTE: could be (defmacro setq (name val) (list 'set (list 'quote name) val)
+    LSymbol "the" -> do
+      case args of
+        [LSymbol t, v] -> do
+          v' <- eval v
+          valid <- typep "the" v' t
+          if valid
+            then pure v'
+            else evalError $ "the: expected type " <> fromSymbol t <> ", but value " <> showt v <> " has type " <> renderType v
+        [e, _] -> evalError $ "the: expected type specifier, got " <> renderType e
+        _ -> numArgs "the" 2 args
     LSymbol "setq" -> do
       case args of
         [LSymbol e, val] -> do
