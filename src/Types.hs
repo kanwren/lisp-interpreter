@@ -86,6 +86,24 @@ typeToSymbol = \case
   LFun _ -> "function"
   LMacro _ -> "macro"
 
+symbolToTypePred :: Symbol -> Maybe (Expr -> Bool)
+symbolToTypePred = \case
+  "number" -> pure $ \case { LInt _ -> True; LRatio _ -> True; _ -> False }
+  "integer" -> pure $ \case { LInt _ -> True; _ -> False }
+  "ratio" -> pure $ \case { LRatio _ -> True; _ -> False }
+  "rational" -> pure $ \case { LRatio _ -> True; _ -> False }
+  "bool" -> pure $ \case { LBool _ -> True; _ -> False }
+  "char" -> pure $ \case { LChar _ -> True; _ -> False }
+  "keyword" -> pure $ \case { LKeyword _ -> True; _ -> False }
+  "string" -> pure $ \case { LString _ -> True; _ -> False }
+  "symbol" -> pure $ \case { LSymbol _ -> True; _ -> False }
+  "null" -> pure $ \case { LList [] -> True; _ -> False }
+  "list" -> pure $ \case { LList _ -> True; LDottedList _ _ -> True; _ -> False }
+  "cons" -> pure $ \case { LDottedList _ _ -> True; LList (_:_) -> True; _ -> False }
+  "function" -> pure $ \case { LBuiltin _ -> True; LFun _ -> True; _ -> False }
+  "macro" -> pure $ \case { LMacro _ -> True; _ -> False }
+  _ -> Nothing
+
 renderChar :: Char -> Text
 renderChar = \case
   ' ' -> "#\\space"

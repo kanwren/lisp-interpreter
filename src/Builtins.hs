@@ -27,10 +27,10 @@ import Types
 type Builtin = [Expr] -> Eval Expr
 
 mkBuiltins :: IO (IORef Context)
-mkBuiltins = do
-  let ctxCell (name, bi) = (name,) <$> newIORef bi
-  cells <- traverse ctxCell (builtinPrims ++ builtinDefs)
-  newIORef $ Context $ Map.fromList cells
+mkBuiltins = newIORef . Context . Map.fromList =<< traverse ctxCell (concat builtins)
+  where
+    ctxCell (name, bi) = (name,) <$> newIORef bi
+    builtins = [builtinPrims, builtinPreds, builtinDefs]
 
 builtinPrims :: [(Symbol, Expr)]
 builtinPrims = fmap (second LBuiltin)
@@ -286,6 +286,41 @@ builtinPrims = fmap (second LBuiltin)
     exit [] = liftIO Exit.exitSuccess
     exit [LInt n] = liftIO $ Exit.exitWith $ Exit.ExitFailure (fromIntegral n)
     exit args = numArgsBound "exit" (0, 1) args
+
+builtinPreds :: [(Symbol, Expr)]
+builtinPreds =
+  [ ("typep", LBuiltin typep)
+  , ("numberp", LBuiltin (typePred "numberp" "number"))
+  , ("integerp", LBuiltin (typePred "integerp" "integer"))
+  , ("ratiop", LBuiltin (typePred "ratiop" "ratio"))
+  , ("rationalp", LBuiltin (typePred "rationalp" "rational"))
+  , ("boolp", LBuiltin (typePred "boolp" "bool"))
+  , ("charp", LBuiltin (typePred "charp" "char"))
+  , ("keywordp", LBuiltin (typePred "keywordp" "keyword"))
+  , ("stringp", LBuiltin (typePred "stringp" "string"))
+  , ("symbolp", LBuiltin (typePred "symbolp" "symbol"))
+  , ("null", LBuiltin (typePred "null" "null"))
+  , ("listp", LBuiltin (typePred "listp" "list"))
+  , ("consp", LBuiltin (typePred "consp" "cons"))
+  , ("functionp", LBuiltin (typePred "functionp" "function"))
+  , ("macrop", LBuiltin (typePred "macrop" "macro"))
+  ]
+  where
+    typep' :: Expr -> Symbol -> Eval Bool
+    typep' v s =
+      case symbolToTypePred s of
+        Just p  -> pure $ p v
+        Nothing -> evalError "typep: invalid type specified"
+
+    typep :: Builtin
+    typep [v, LSymbol s] = LBool <$> typep' v s
+    typep [_, _] = evalError "typep: invalid type specified"
+    typep args = numArgs "typep" 2 args
+
+    typePred :: Symbol -> Symbol -> Builtin
+    typePred name s = \case
+      [v] -> LBool <$> typep' v s
+      args -> numArgs name 1 args
 
 builtinDefs :: [(Symbol, Expr)]
 builtinDefs =
