@@ -307,13 +307,12 @@ builtinPreds =
   ]
   where
     primTypep :: Builtin
-    primTypep [v, LSymbol s] = LBool <$> typep "typep" v s
-    primTypep [_, _] = evalError "typep: invalid type specifier"
+    primTypep [v, e] = LBool <$> typep "typep" v e
     primTypep args = numArgs "typep" 2 args
 
     typePred :: Symbol -> Symbol -> Builtin
     typePred name s = \case
-      [v] -> LBool <$> typep name v s
+      [v] -> LBool <$> typep name v (LSymbol s)
       args -> numArgs name 1 args
 
 builtinDefs :: [(Symbol, Expr)]

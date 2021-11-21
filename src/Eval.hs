@@ -143,11 +143,39 @@ function opName name n args =
     keyArgs (ma, oa, r, ka) (LList [LSymbol s, v]:xs)  = keyArgs (ma, oa, r, Map.insert s v ka) xs
     keyArgs _               (x:_)                      = Left $ toError $ "invalid argument list: invalid parameter " <> showt x
 
-typep :: Symbol -> Expr -> Symbol -> Eval Bool
-typep name v s =
-  case symbolToTypePred s of
-    Just p  -> pure $ p v
-    Nothing -> evalError $ fromSymbol name <> ": invalid type specifier"
+typep :: Symbol -> Expr -> Expr -> Eval Bool
+typep name v = go
+  where
+    go (LSymbol s) =
+      case symbolToTypePred s of
+        Just p  -> pure $ p v
+        Nothing -> evalError $ fromSymbol name <> ": invalid type specifier"
+    go (LList (LSymbol "and":spec)) = and <$> traverse go spec
+    go (LList (LSymbol "or":spec)) = or <$> traverse go spec
+    go (LList (LSymbol "not":spec)) =
+      case spec of
+        [p] -> not <$> go p
+        _ -> evalError $ fromSymbol name <> ": expected exactly 1 argument to not, but got " <> showt (length spec)
+    -- TODO: support promotion
+    go (LList (LSymbol "integer":spec)) =
+      case v of
+        LInt n ->
+          case spec of
+            [LInt lower] -> pure $ lower <= n
+            [LList [LInt lower]] -> pure $ lower <= n
+            [LInt lower, LInt upper] -> pure $ lower <= n && n <= upper
+            _ -> evalError $ fromSymbol name <> ": invalid type specifier: invalid arguments to predicate integer"
+        _ -> pure False
+    go (LList (LSymbol "rational":spec)) =
+      case v of
+        LRatio n ->
+          case spec of
+            [LRatio lower] -> pure $ lower <= n
+            [LList [LRatio lower]] -> pure $ lower <= n
+            [LRatio lower, LRatio upper] -> pure $ lower <= n && n <= upper
+            _ -> evalError $ fromSymbol name <> ": invalid type specifier: invalid arguments to predicate integer"
+        _ -> pure False
+    go _ = evalError $ fromSymbol name <> ": invalid type specifier"
 
 -- Evaluate a list of expressions and return the value of the final expression
 progn :: [Expr] -> Eval Expr
@@ -231,13 +259,12 @@ eval (LList (f:args)) =
       go args
     LSymbol "the" -> do
       case args of
-        [LSymbol t, v] -> do
+        [spec, v] -> do
           v' <- eval v
-          valid <- typep "the" v' t
+          valid <- typep "the" v' spec
           if valid
             then pure v'
-            else evalError $ "the: expected type " <> fromSymbol t <> ", but value " <> showt v <> " has type " <> renderType v
-        [e, _] -> evalError $ "the: expected type specifier, got " <> renderType e
+            else evalError $ "the: expected type " <> showt spec <> ", but value " <> showt v <> " has type " <> renderType v
         _ -> numArgs "the" 2 args
     LSymbol "setq" -> do
       case args of

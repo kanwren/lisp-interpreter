@@ -91,7 +91,7 @@ symbolToTypePred = \case
   "number" -> pure $ \case { LInt _ -> True; LRatio _ -> True; _ -> False }
   "integer" -> pure $ \case { LInt _ -> True; _ -> False }
   "ratio" -> pure $ \case { LRatio _ -> True; _ -> False }
-  "rational" -> pure $ \case { LRatio _ -> True; _ -> False }
+  "rational" -> pure $ \case { LRatio _ -> True; LInt _ -> True; _ -> False }
   "bool" -> pure $ \case { LBool _ -> True; _ -> False }
   "char" -> pure $ \case { LChar _ -> True; _ -> False }
   "keyword" -> pure $ \case { LKeyword _ -> True; _ -> False }
