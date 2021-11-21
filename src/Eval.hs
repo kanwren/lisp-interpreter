@@ -250,7 +250,7 @@ eval (LList (f:args)) =
     LSymbol "or" -> do
       let
         go [] = pure $ LBool False
-        go [x] = pure x
+        go [x] = eval x
         go (x:xs) = do
           x' <- eval x
           if truthy x'
