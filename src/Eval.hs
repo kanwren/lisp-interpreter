@@ -263,7 +263,7 @@ eval (LList (f:args)) =
           valid <- typep "the" v' spec
           if valid
             then pure v'
-            else evalError $ "the: expected type " <> showt spec <> ", but value " <> showt v <> " has type " <> renderType v
+            else evalError $ "the: expected type " <> showt spec <> ", but value " <> showt v' <> " has type " <> renderType v'
         _ -> numArgs "the" 2 args
     LSymbol "setq" -> do
       case args of
