@@ -21,11 +21,13 @@ import Data.Maybe (fromMaybe, isJust)
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Text (Text)
+import Data.Text qualified as Text
 import Data.Vector (Vector)
 import Data.Vector qualified as Vector
 import TextShow (TextShow(..))
 
 import Errors
+import Parser (parseFile)
 import Types
 
 nil :: Expr
@@ -34,6 +36,12 @@ nil = LList []
 mkContext :: [(Symbol, Expr)] -> Eval Context
 mkContext pairs = liftIO $ do
   Context . Map.fromList <$> traverse (\(x, y) -> newIORef y <&> (x,)) pairs
+
+evalFile :: String -> Eval Expr
+evalFile contents =
+  case parseFile contents of
+    Right res -> progn res
+    Left e -> evalError $ "load: parse error: " <> Text.pack e
 
 hasVar :: Symbol -> Eval Bool
 hasVar i = do

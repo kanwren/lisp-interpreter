@@ -2,23 +2,26 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 
 module Main where
 
+import Control.Exception (SomeException, displayException, throw)
+import Control.Monad.Catch (catches, Handler(..), MonadCatch)
 import Control.Monad.Error.Class (catchError)
 import Control.Monad.Except (MonadError)
 import Control.Monad.IO.Class
 import Control.Monad.Trans (lift)
 import Data.Text qualified as Text
 import System.Console.Haskeline (InputT, runInputT, defaultSettings, getInputLine)
+import System.Environment (getArgs)
+import System.Exit (ExitCode)
 import TextShow (showt)
 
 import Builtins (mkBuiltins)
-import Eval (eval)
+import Eval (eval, evalFile)
 import Parser (parseLine)
-import Types (Error(..), Eval(..), Bubble(..), fromSymbol, renderTagName)
-import Control.Exception (displayException, SomeException)
-import Control.Monad.Catch (catch)
+import Types (Error(..), Eval(..), Bubble(..), fromSymbol, renderTagName, Expr(LList))
 
 tryError :: MonadError e m => m a -> m (Either e a)
 tryError act = fmap Right act `catchError` (pure . Left)
@@ -32,8 +35,14 @@ handleBubble h = \case
     "<toplevel>: error going to tag " <> renderTagName tagName <> ": no such tag in scope"
   Right v -> h v
 
-main :: IO ()
-main = do
+handleExceptions :: forall m. (MonadIO m, MonadCatch m) => m () -> m ()
+handleExceptions = flip catches
+  [ Handler $ \(e :: ExitCode) -> throw e
+  , Handler $ \(e :: SomeException) -> liftIO $ liftIO $ putStrLn $ "<toplevel>: exception: " <> displayException e
+  ]
+
+repl :: IO ()
+repl = do
   builtins <- mkBuiltins
   res <- flip runEval builtins $ runInputT defaultSettings loop
   handleBubble (\_ -> pure ()) res
@@ -46,9 +55,21 @@ main = do
         case parseLine line of
           Left e -> liftIO $ putStrLn e
           Right Nothing -> pure () -- comment line or empty line
-          Right (Just expr) -> lift $ do
-            handleBubble (liftIO . print) =<< tryError (eval expr)
-            `catch`
-            \(e :: SomeException) -> liftIO $ putStrLn $ "<toplevel>: exception: " ++ displayException e
+          Right (Just expr) -> lift $ handleExceptions $ do
+            res <- tryError (eval expr)
+            handleBubble (\case LList [] -> pure (); e -> liftIO (print e)) res
         loop
 
+runFile :: String -> IO ()
+runFile path = do
+  contents <- readFile path
+  builtins <- mkBuiltins
+  handleExceptions $ do
+    res <- runEval (evalFile contents) builtins
+    handleBubble (\_ -> pure ()) res
+
+main :: IO ()
+main = getArgs >>= \case
+  [] -> repl
+  [path] -> runFile path
+  _ -> putStrLn "error: too many arguments"

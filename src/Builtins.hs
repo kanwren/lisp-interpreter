@@ -20,8 +20,7 @@ import System.Exit qualified as Exit
 import TextShow (TextShow(..))
 
 import Errors
-import Eval (apply, eval, setVar, nil, progn, typep)
-import Parser (parseFile)
+import Eval (apply, eval, setVar, nil, typep, evalFile)
 import Types
 
 type Builtin = [Expr] -> Eval Expr
@@ -274,11 +273,7 @@ builtinPrims = fmap (second LBuiltin)
     typeOf args = numArgs "type-of" 1 args
 
     load :: Builtin
-    load [LString path] = do
-      contents <- liftIO $ readFile $ Text.unpack path
-      case parseFile contents of
-        Right res -> progn res
-        Left e -> evalError $ "load: parse error: " <> Text.pack e
+    load [LString path] = evalFile =<< liftIO (readFile (Text.unpack path))
     load [e] = evalError $ "load: expected string as path, but got " <> renderType e
     load args = numArgs "load" 1 args
 
