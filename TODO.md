@@ -4,5 +4,8 @@
 - Tail call optimization
 - `defconst`
 - `flet`, `labels`, `macrolet`
-- Move some things into a standard library:
-  - `(defun list (&rest xs) xs)`
+- `let*`, `letrec`
+- numbers
+  - better promotions rules
+  - floats
+  - complex numbers
