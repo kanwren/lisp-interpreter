@@ -14,7 +14,7 @@ import Control.Monad.IO.Class
 import Control.Monad.Reader (ask)
 import Data.Foldable (foldlM)
 import Data.Functor ((<&>))
-import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.IORef (newIORef, readIORef, writeIORef, IORef)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe, isJust)
@@ -61,6 +61,9 @@ specialOps = Set.fromList
   , "lambda"
   , "let"
   , "defmacro"
+  , "flet"
+  , "labels"
+  , "macrolet"
   , "progn"
   , "when"
   , "unless"
@@ -83,10 +86,14 @@ setVar i val
       Just ref -> liftIO $ writeIORef ref val
 
 function :: Symbol -> Maybe Symbol -> Int -> [Expr] -> Eval Closure
-function opName name n args =
+function opName name n args = do
+  context <- ask
+  functionWithContext context opName name n args
+
+functionWithContext :: IORef Context -> Symbol -> Maybe Symbol -> Int -> [Expr] -> Eval Closure
+functionWithContext context opName name n args =
   case args of
     (LList params:body) -> do
-      context <- ask
       (mainParams, optionals, rest, keywordParams) <- parseArgs params
       pure Closure
         { closureName = name
@@ -98,7 +105,8 @@ function opName name n args =
         , closureContext = context
         }
     (_:_) -> evalError $ fromSymbol opName <> ": invalid parameter list"
-    _ -> numArgsAtLeast opName n args
+    -- if name is given, it was a parameter, so count it in the list
+    _ -> numArgsAtLeast opName n $ maybe args (\n' -> LSymbol n':args) name
   where
     toError :: Text -> Eval a
     toError e = evalError $ fromSymbol opName <> ": " <> e
@@ -215,6 +223,11 @@ truthy = \case
 condition :: Expr -> Eval Bool
 condition cond = truthy <$> eval cond
 
+letBody :: Symbol -> [Expr] -> Eval ([Expr], [Expr])
+letBody name []              = numArgs name 1 []
+letBody _    (LList xs:body) = pure (xs, body)
+letBody name (_:_)           = evalError $ fromSymbol name <> ": invalid bindings"
+
 eval :: Expr -> Eval Expr
 eval (LInt n) = pure $ LInt n
 eval (LRatio n) = pure $ LRatio n
@@ -230,6 +243,11 @@ eval (LDottedList xs _) = eval (LList xs)
 eval (LList []) = pure nil
 eval (LList (f:args)) =
   case f of
+    -- NOTE: equivalent to (defmacro quote (x) (list 'quote x))
+    LSymbol "quote" ->
+      case args of
+        [x] -> pure x
+        _   -> numArgs "quote" 1 args
     LSymbol "if" -> do
       case args of
         [cond, x, y] -> do
@@ -242,9 +260,7 @@ eval (LList (f:args)) =
         go [x] = eval x
         go (x:xs) = do
           x' <- condition x
-          if x'
-          then go xs
-          else pure $ LBool False
+          if x' then go xs else pure $ LBool False
       go args
     LSymbol "or" -> do
       let
@@ -252,9 +268,7 @@ eval (LList (f:args)) =
         go [x] = eval x
         go (x:xs) = do
           x' <- eval x
-          if truthy x'
-          then pure x'
-          else go xs
+          if truthy x' then pure x' else go xs
       go args
     LSymbol "the" -> do
       case args of
@@ -288,11 +302,6 @@ eval (LList (f:args)) =
           pure $ LSymbol e
         [_, _] -> evalError "defvar: expected symbol as variable name"
         _ -> numArgs "defvar" 2 args
-    -- NOTE: equivalent to (defmacro quote (x) (list 'quote x))
-    LSymbol "quote" ->
-      case args of
-        [x] -> pure x
-        _ -> numArgs "quote" 1 args
     LSymbol "defun" -> do
       case args of
         (LSymbol sym:spec) -> do
@@ -301,18 +310,6 @@ eval (LList (f:args)) =
           pure $ LSymbol sym
         (_:_) -> evalError "defun: expected symbol for function name"
         _ -> numArgs "defun" 2 args
-    LSymbol "lambda" -> LFun <$> function "lambda" Nothing 1 args
-    LSymbol "let" -> do
-      case args of
-        [] -> numArgs "let" 1 args
-        (LList xs:body) -> do
-          let
-            getBinding (LList [LSymbol name, val]) = (name,) <$> eval val
-            getBinding (LSymbol name) = pure (name, nil)
-            getBinding _ = evalError "let: invalid variable specification"
-          binds <- mkContext =<< traverse getBinding xs
-          withLocalBindings binds $ progn body
-        _ -> evalError "let: invalid variable specification"
     LSymbol "defmacro" ->
       case args of
         (LSymbol sym:spec) -> do
@@ -321,6 +318,39 @@ eval (LList (f:args)) =
           pure $ LSymbol sym
         (_:_) -> evalError "defmacro: expected symbol for macro name"
         _ -> numArgs "defmacro" 2 args
+    LSymbol "lambda" -> LFun <$> function "lambda" Nothing 1 args
+    LSymbol "let" -> do
+      (xs, body) <- letBody "let" args
+      let
+        getBinding (LList [LSymbol name, val]) = (name,) <$> eval val
+        getBinding (LSymbol name) = pure (name, nil)
+        getBinding _ = evalError "let: invalid variable specification"
+      binds <- mkContext =<< traverse getBinding xs
+      withLocalBindings binds $ progn body
+    LSymbol "flet" -> do
+      (xs, body) <- letBody "flet" args
+      let
+        getFuncBinding (LList (LSymbol name:params:fbody)) = (name,) . LFun <$> function "flet" (Just name) 2 (params:fbody)
+        getFuncBinding _ = evalError "flet: invalid function specification"
+      binds <- mkContext =<< traverse getFuncBinding xs
+      withLocalBindings binds $ progn body
+    LSymbol "labels" -> do
+      (xs, body) <- letBody "labels" args
+      let
+        makeBindings :: IORef Context -> Eval Context
+        makeBindings ctx = do
+          let
+            getFuncBinding (LList (LSymbol name:params:fbody)) = (name,) . LFun <$> functionWithContext ctx "labels" (Just name) 2 (params:fbody)
+            getFuncBinding _ = evalError "labels: invalid function specification"
+          mkContext =<< traverse getFuncBinding xs
+      withRecursiveBindings makeBindings (progn body)
+    LSymbol "macrolet" -> do
+      (xs, body) <- letBody "macrolet" args
+      let
+        getFuncBinding (LList (LSymbol name:params:fbody)) = (name,) . LMacro <$> function "macrolet" (Just name) 2 (params:fbody)
+        getFuncBinding _ = evalError "macrolet: invalid macro specification"
+      binds <- mkContext =<< traverse getFuncBinding xs
+      withLocalBindings binds $ progn body
     LSymbol "progn" -> progn args
     LSymbol "when" -> do
       case args of
@@ -334,40 +364,34 @@ eval (LList (f:args)) =
           cond' <- condition cond
           if not cond' then progn body else pure nil
         _ -> numArgsAtLeast "unless" 1 args
-    -- NOTE: allowed block names are nil and symbols
+    -- NOTE: allowed block names are nil and symbols, nil should behave the same
+    -- as 'nil
     LSymbol "block" -> do
       case args of
         (LSymbol blockName:body) -> block blockName $ progn body
-        (LList []:body) -> block "nil" $ progn body
-        (_:_) -> evalError "block: expected symbol as block name"
-        _ -> numArgsAtLeast "block" 1 args
+        (LList []:body)          -> block "nil" $ progn body
+        (_:_)                    -> evalError "block: expected symbol as block name"
+        _                        -> numArgsAtLeast "block" 1 args
     LSymbol "return-from" -> do
       case args of
-        [LSymbol blockName] -> throwError $ ReturnFrom blockName nil
+        [LSymbol blockName]      -> throwError $ ReturnFrom blockName nil
         [LSymbol blockName, val] -> throwError . ReturnFrom blockName =<< eval val
-        -- TODO: this should be generalized; 'nil and () are the same in CL
-        [LList []] -> throwError $ ReturnFrom "nil" nil
-        [LList [], val] -> throwError . ReturnFrom "nil" =<< eval val
-        [_] -> evalError "return-from: expected symbol for block name"
-        [_, _] -> evalError "return-from: expected symbol for block name"
-        _ -> numArgsBound "return-from" (1, 2) args
+        [LList []]               -> throwError $ ReturnFrom "nil" nil
+        [LList [], val]          -> throwError . ReturnFrom "nil" =<< eval val
+        [_]                      -> evalError "return-from: expected symbol for block name"
+        [_, _]                   -> evalError "return-from: expected symbol for block name"
+        _                        -> numArgsBound "return-from" (1, 2) args
+    -- NOTE: allowed tags are numbers, symbols, keywords, and nil
     LSymbol "go" -> do
       case args of
         [LSymbol sym] -> throwError $ TagGo $ TagSymbol sym
-        [LKeyword b] -> throwError $ TagGo $ TagKeyword b
-        [LInt n] -> throwError $ TagGo $ TagInt n
-        [LRatio n] -> throwError $ TagGo $ TagRatio n
-        [LList []] -> throwError $ TagGo $ TagSymbol "nil"
-        [e] -> evalError $ "go: invalid tag type: " <> renderType e
-        _ -> numArgs "go" 1 args
-    -- NOTE: allowed tags are numbers, symbols, keywords, and nil
+        [LKeyword b]  -> throwError $ TagGo $ TagKeyword b
+        [LInt n]      -> throwError $ TagGo $ TagInt n
+        [LRatio n]    -> throwError $ TagGo $ TagRatio n
+        [LList []]    -> throwError $ TagGo $ TagSymbol "nil"
+        [e]           -> evalError $ "go: invalid tag type: " <> renderType e
+        _             -> numArgs "go" 1 args
     LSymbol "tagbody" -> do
-      -- collect arguments into vectors, construct table mapping symbols to
-      -- indices
-      -- (watch out for symbols on end and consecutive symbols)
-      -- evaluate progn at index 0
-      -- catch any TagGo exceptions, and if there's an appropriate tag name in
-      -- scope, start evaluating there
       (table, exprs) <- buildTagTable args
       let
         len = Vector.length exprs
@@ -383,10 +407,10 @@ eval (LList (f:args)) =
       go 0
       pure nil
     _ -> eval f >>= \case
-      LBuiltin f' -> f' =<< traverse eval args
-      LFun f' -> apply f' =<< traverse eval args
-      LMacro m -> eval =<< apply m args
-      e -> evalError $ "expected function in call: " <> showt e
+      LBuiltin f' -> f'       =<< traverse eval args
+      LFun     f' -> apply f' =<< traverse eval args
+      LMacro   m  -> eval     =<< apply m args
+      e           -> evalError $ "expected function in call: " <> showt e
 
 apply :: Closure -> [Expr] -> Eval Expr
 apply Closure{..} args = do

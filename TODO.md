@@ -3,7 +3,6 @@
 - Loops!
 - Tail call optimization
 - `defconst`
-- `flet`, `labels`, `macrolet`
 - `let*`, `letrec`
 - numbers
   - better promotions rules

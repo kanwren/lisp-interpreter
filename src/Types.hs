@@ -12,7 +12,7 @@ import Control.Monad.Except ( ExceptT(ExceptT), MonadError )
 import Control.Monad.IO.Class
 import Control.Monad.Reader (ReaderT(..), MonadReader, local, ask)
 import Data.CaseInsensitive (CI, foldedCase, mk)
-import Data.IORef (IORef, readIORef, newIORef)
+import Data.IORef (IORef, readIORef, newIORef, writeIORef)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Ratio qualified as Ratio
@@ -184,3 +184,11 @@ withLocalBindings bindings act = do
   ctx <- liftIO . readIORef =<< ask
   ctx' <- liftIO $ newIORef $ ctx <> bindings
   local (const ctx') act
+
+withRecursiveBindings :: (IORef Context -> Eval Context) -> Eval a -> Eval a
+withRecursiveBindings f act = do
+  ctx <- liftIO . readIORef =<< ask
+  ctxRef' <- liftIO $ newIORef ctx
+  ctx' <- (ctx <>) <$> f ctxRef'
+  liftIO $ writeIORef ctxRef' ctx'
+  local (const ctxRef') act

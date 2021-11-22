@@ -24,13 +24,13 @@
     ((null ys) xs)
     (#t (cons (car xs) (append (cdr xs) ys)))))
 
-; TODO - switch to labels once implemented
 (defun reverse (xs)
-  (defun rec (acc ys)
-    (if (null ys)
-      acc
-      (rec (cons (car ys) acc) (cdr ys))))
-  (rec nil xs))
+  (labels
+    ((rec (acc ys)
+          (if (null ys)
+            acc
+            (rec (cons (car ys) acc) (cdr ys)))))
+    (rec nil xs)))
 
 (defmacro push (x xs)
   (list 'setq xs (list 'cons x xs)))
