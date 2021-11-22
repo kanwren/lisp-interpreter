@@ -1,6 +1,7 @@
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Main where
 
@@ -16,6 +17,8 @@ import Builtins (mkBuiltins)
 import Eval (eval)
 import Parser (parseLine)
 import Types (Error(..), Eval(..), Bubble(..), fromSymbol, renderTagName)
+import Control.Exception (displayException, SomeException)
+import Control.Monad.Catch (catch)
 
 tryError :: MonadError e m => m a -> m (Either e a)
 tryError act = fmap Right act `catchError` (pure . Left)
@@ -44,6 +47,8 @@ main = do
           Left e -> liftIO $ putStrLn e
           Right Nothing -> pure () -- comment line or empty line
           Right (Just expr) -> lift $ do
-            tryError (eval expr) >>= handleBubble (liftIO . print)
+            handleBubble (liftIO . print) =<< tryError (eval expr)
+            `catch`
+            \(e :: SomeException) -> liftIO $ putStrLn $ "<toplevel>: exception: " ++ displayException e
         loop
 
