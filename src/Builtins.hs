@@ -66,6 +66,7 @@ builtinPrims = fmap (second LBuiltin)
   , ("eval", primEval)
   , ("apply", primApply)
   , ("type-of", typeOf)
+  , ("gensym", primGensym)
   , ("print", printExpr)
   , ("load", load)
   , ("exit", exit)
@@ -261,6 +262,10 @@ builtinPrims = fmap (second LBuiltin)
     typeOf :: Builtin
     typeOf [v] = pure $ LSymbol $ typeToSymbol v
     typeOf args = numArgs "type-of" 1 args
+
+    primGensym :: Builtin
+    primGensym [] = LSymbol <$> genSym
+    primGensym args = numArgs "gensym" 0 args
 
     printExpr :: Builtin
     printExpr [e] = liftIO (print e) $> e

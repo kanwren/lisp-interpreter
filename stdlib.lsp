@@ -88,6 +88,21 @@
                 (cons 'progn rest)
                 ))))
 
+(defmacro for-each (var xs &rest body)
+  (let ((ys (gensym)))
+    (list 'let (list (list ys (list 'the 'list xs)))
+          (list 'block nil
+                (list 'tagbody
+                      'loop-begin
+                      (list 'when (list 'null ys) (list 'go 'loop-end))
+                      (list 'let (list (list var (list 'car ys)))
+                            (cons 'progn body))
+                      'loop-continue
+                      (list 'setq ys (list 'cdr ys))
+                      (list 'go 'loop-begin)
+                      'loop-end
+                      )))))
+
 ; TODO - other loops
 
 (defmacro return (&optional val) (list 'return-from nil val))

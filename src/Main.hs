@@ -22,6 +22,7 @@ import Builtins (mkBuiltins)
 import Eval (eval, evalFile)
 import Parser (parseLine)
 import Types (Error(..), Eval(..), Bubble(..), fromSymbol, renderTagName, Expr(LList))
+import Data.Default (def)
 
 tryError :: MonadError e m => m a -> m (Either e a)
 tryError act = fmap Right act `catchError` (pure . Left)
@@ -44,7 +45,7 @@ handleExceptions = flip catches
 repl :: IO ()
 repl = do
   builtins <- mkBuiltins
-  res <- flip runEval builtins $ runInputT defaultSettings loop
+  (res, _) <- runEval (runInputT defaultSettings loop) builtins def
   handleBubble (\_ -> pure ()) res
   where
     loop :: InputT Eval ()
@@ -65,7 +66,7 @@ runFile path = do
   contents <- readFile path
   builtins <- mkBuiltins
   handleExceptions $ do
-    res <- runEval (evalFile contents) builtins
+    (res, _) <- runEval (evalFile contents) builtins def
     handleBubble (\_ -> pure ()) res
 
 main :: IO ()

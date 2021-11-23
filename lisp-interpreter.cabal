@@ -43,6 +43,7 @@ executable lisp-interpreter
                       , case-insensitive
                       , text-show
                       , vector
+                      , data-default
     hs-source-dirs:   src
     default-language: Haskell2010
     ghc-options:

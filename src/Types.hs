@@ -4,6 +4,9 @@
 {-# LANGUAGE ImportQualifiedPost #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Types where
 
@@ -21,6 +24,8 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import TextShow (TextShow(..))
 import TextShow qualified (fromText, unwordsB, FromTextShow(..))
+import Control.Monad.State (MonadState, StateT(..), state)
+import Data.Default (Default(..))
 
 newtype Symbol = Symbol { getSymbol :: CI Text }
   deriving newtype (Eq, Ord, IsString)
@@ -165,16 +170,33 @@ instance Semigroup Context where
 instance Monoid Context where
   mempty = Context Map.empty
 
+-- Symbol generation
+
+newtype SymbolGenerator = SymbolGenerator { getSymGen :: Int }
+
+nextSym :: SymbolGenerator -> (Symbol, SymbolGenerator)
+nextSym (SymbolGenerator n) = (Symbol (mk ("#:g" <> showt n)), SymbolGenerator (n + 1))
+
+instance Default SymbolGenerator where
+  def = SymbolGenerator 0
+
+class SymGen m where
+  genSym :: m Symbol
+
+instance MonadState SymbolGenerator m => SymGen m where
+  genSym = state nextSym
+
 -- Eval
 
-newtype Eval a = Eval { runEval :: IORef Context -> IO (Either Bubble a) }
+newtype Eval a = Eval { runEval :: IORef Context -> SymbolGenerator -> IO (Either Bubble a, SymbolGenerator) }
   deriving
     ( Functor, Applicative, Monad
     , MonadReader (IORef Context), MonadError Bubble
+    , MonadState SymbolGenerator
     , MonadThrow, MonadCatch, MonadMask
     , MonadIO
     )
-    via ReaderT (IORef Context) (ExceptT Bubble IO)
+    via ReaderT (IORef Context) (ExceptT Bubble (StateT SymbolGenerator IO))
 
 inContext :: IORef Context -> Eval a -> Eval a
 inContext ctx' = local (const ctx')
