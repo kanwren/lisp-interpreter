@@ -51,14 +51,6 @@ builtinPrims = fmap (second LBuiltin)
   , ("<=", ile)
   , ("not", primNot)
   , ("equal", equal)
-  , ("set", primSet)
-  , ("eval", primEval)
-  , ("list", list)
-  , ("apply", primApply)
-  , ("cons", cons)
-  , ("car", car)
-  , ("cdr", cdr)
-  , ("null", primNull)
   , ("length", primLength)
   , ("char", primChar)
   , ("string=", stringEq)
@@ -66,6 +58,13 @@ builtinPrims = fmap (second LBuiltin)
   , ("string<", stringLt)
   , ("string>=", stringGe)
   , ("string<=", stringLe)
+  , ("list", list)
+  , ("cons", cons)
+  , ("car", car)
+  , ("cdr", cdr)
+  , ("set", primSet)
+  , ("eval", primEval)
+  , ("apply", primApply)
   , ("type-of", typeOf)
   , ("print", printExpr)
   , ("load", load)
@@ -162,47 +161,6 @@ builtinPrims = fmap (second LBuiltin)
     ige = comparison ">=" (>=) (>=)
     ile = comparison "<=" (<=) (<=)
 
-    primSet :: Builtin
-    primSet [LSymbol name, value] = setVar name value $> value
-    primSet [_, _] = evalError "set: expected symbol as variable name"
-    primSet args = numArgs "set" 2 args
-
-    primEval :: Builtin
-    primEval [e] = eval e
-    primEval args = numArgs "eval" 1 args
-
-    list :: Builtin
-    list xs = pure $ LList xs
-
-    primApply :: Builtin
-    primApply [LFun f, LList xs] = apply f xs
-    primApply [LFun _, _] = evalError "apply: expected list for arguments"
-    primApply [_, _] = evalError "apply: expected function"
-    primApply args = numArgs "apply" 2 args
-
-    cons :: Builtin
-    cons [x, LList y] = pure $ LList (x:y)
-    cons [x, LDottedList y z] = pure $ LDottedList (x:y) z
-    cons [x, y] = pure $ LDottedList [x] y
-    cons args = numArgs "cons" 2 args
-
-    car :: Builtin
-    car [LList []] = evalError "car: empty list"
-    car [LList (x:_)] = pure x
-    car [_] = evalError "car: expected list"
-    car args = numArgs "car" 1 args
-
-    cdr :: Builtin
-    cdr [LList []] = evalError "cdr: empty list"
-    cdr [LList (_:xs)] = pure $ LList xs
-    cdr [_] = evalError "cdr: expected list"
-    cdr args = numArgs "cdr" 1 args
-
-    primNull :: Builtin
-    primNull [LList []] = pure $ LBool True
-    primNull [_] = pure $ LBool False
-    primNull args = numArgs "null" 1 args
-
     primLength :: Builtin
     primLength [LList xs] = pure $ LInt $ fromIntegral $ length xs
     primLength [LString xs] = pure $ LInt $ fromIntegral $ Text.length xs
@@ -264,13 +222,49 @@ builtinPrims = fmap (second LBuiltin)
         equal' (LFun _) (LFun _) = pure False
         equal' x y = evalError $ "equal: incompatible types " <> renderType x <> " and " <> renderType y
 
-    printExpr :: Builtin
-    printExpr [e] = liftIO (print e) $> e
-    printExpr args = numArgs "print" 1 args
+    list :: Builtin
+    list xs = pure $ LList xs
+
+    cons :: Builtin
+    cons [x, LList y] = pure $ LList (x:y)
+    cons [x, LDottedList y z] = pure $ LDottedList (x:y) z
+    cons [x, y] = pure $ LDottedList [x] y
+    cons args = numArgs "cons" 2 args
+
+    car :: Builtin
+    car [LList []] = evalError "car: empty list"
+    car [LList (x:_)] = pure x
+    car [_] = evalError "car: expected list"
+    car args = numArgs "car" 1 args
+
+    cdr :: Builtin
+    cdr [LList []] = evalError "cdr: empty list"
+    cdr [LList (_:xs)] = pure $ LList xs
+    cdr [_] = evalError "cdr: expected list"
+    cdr args = numArgs "cdr" 1 args
+
+    primSet :: Builtin
+    primSet [LSymbol name, value] = setVar name value $> value
+    primSet [_, _] = evalError "set: expected symbol as variable name"
+    primSet args = numArgs "set" 2 args
+
+    primEval :: Builtin
+    primEval [e] = eval e
+    primEval args = numArgs "eval" 1 args
+
+    primApply :: Builtin
+    primApply [LFun f, LList xs] = apply f xs
+    primApply [LFun _, _] = evalError "apply: expected list for arguments"
+    primApply [_, _] = evalError "apply: expected function"
+    primApply args = numArgs "apply" 2 args
 
     typeOf :: Builtin
     typeOf [v] = pure $ LSymbol $ typeToSymbol v
     typeOf args = numArgs "type-of" 1 args
+
+    printExpr :: Builtin
+    printExpr [e] = liftIO (print e) $> e
+    printExpr args = numArgs "print" 1 args
 
     load :: Builtin
     load [LString path] = evalFile =<< liftIO (readFile (Text.unpack path))
