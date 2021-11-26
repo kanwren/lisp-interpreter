@@ -29,6 +29,7 @@ executable lisp-interpreter
       Types
       Builtins
       Errors
+      Char
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

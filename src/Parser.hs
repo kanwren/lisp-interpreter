@@ -14,6 +14,7 @@ import Text.Megaparsec qualified as M
 import Text.Megaparsec.Char qualified as MC
 import Text.Megaparsec.Char.Lexer qualified as MCL
 
+import Char (parseSpecialChar)
 import Types
 
 type Parser = M.Parsec Void String
@@ -49,13 +50,7 @@ pExpr = M.choice
     pBool = label "bool literal" $ fmap LBool $ (MC.string "#f" $> False) <|> (MC.string "#t" $> True)
     pChar = label "char literal" $ do
       void $ MC.string "#\\"
-      try pSpecialChar <|> pAnyChar <?> "char name"
-    pSpecialChar = LChar <$> M.choice
-      [ "space" $> ' '
-      , "tab" $> '\t'
-      , "newline" $> '\n'
-      , "return" $> '\r'
-      ]
+      try (LChar <$> parseSpecialChar) <|> pAnyChar <?> "char name"
     pAnyChar = LChar <$> M.anySingle
     pKeyword = label "keyword" $ MC.char ':' *> M.choice
       [ MC.char '|' *> (LKeyword . ArbKeyword . Text.pack <$> M.manyTill (try (MC.string "\\|" $> '|') <|> MCL.charLiteral) (MC.char '|'))

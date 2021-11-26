@@ -27,6 +27,8 @@ import TextShow qualified (fromText, unwordsB, FromTextShow(..))
 import Control.Monad.State (MonadState, StateT(..), state)
 import Data.Default (Default(..))
 
+import Char (renderChar)
+
 newtype Symbol = Symbol { getSymbol :: CI Text }
   deriving newtype (Eq, Ord, IsString)
 
@@ -108,14 +110,6 @@ symbolToTypePred = \case
   "function" -> pure $ \case { LBuiltin _ -> True; LFun _ -> True; _ -> False }
   "macro" -> pure $ \case { LMacro _ -> True; _ -> False }
   _ -> Nothing
-
-renderChar :: Char -> Text
-renderChar = \case
-  ' ' -> "#\\space"
-  '\t' -> "#\\tab"
-  '\n' -> "#\\newline"
-  '\r' -> "#\\return"
-  c -> "#\\" <> Text.singleton c
 
 renderRatio :: Rational -> Text
 renderRatio n = showt num <> "/" <> showt den
