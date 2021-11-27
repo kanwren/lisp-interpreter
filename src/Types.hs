@@ -26,6 +26,8 @@ import TextShow (TextShow(..))
 import TextShow qualified (fromText, unwordsB, FromTextShow(..))
 import Control.Monad.State (MonadState, StateT(..), state)
 import Data.Default (Default(..))
+import Data.List.NonEmpty (NonEmpty)
+import Data.List.NonEmpty qualified as NonEmpty
 
 import Char (renderChar)
 
@@ -68,7 +70,7 @@ data Expr
   | LString Text
   | LSymbol Symbol
   | LList [Expr]
-  | LDottedList [Expr] Expr
+  | LDottedList (NonEmpty Expr) Expr
   | LBuiltin ([Expr] -> Eval Expr)
   | LFun Closure
   | LMacro Closure
@@ -128,7 +130,7 @@ instance TextShow Expr where
     LList [LSymbol "quote", x] -> "'" <> showb x
     LList [] -> "nil"
     LList xs -> "(" <> TextShow.unwordsB (fmap showb xs) <> ")"
-    LDottedList xs x -> "(" <> TextShow.unwordsB (fmap showb xs) <> " . " <> showb x <> ")"
+    LDottedList xs x -> "(" <> TextShow.unwordsB (fmap showb (NonEmpty.toList xs)) <> " . " <> showb x <> ")"
     LBuiltin _ -> "<builtin>"
     LFun _ -> "<function>"
     LMacro _ -> "<macro>"

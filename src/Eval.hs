@@ -15,6 +15,7 @@ import Control.Monad.Reader (ask)
 import Data.Foldable (foldlM)
 import Data.Functor ((<&>))
 import Data.IORef (newIORef, readIORef, writeIORef, IORef)
+import Data.List.NonEmpty qualified as NonEmpty
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe, isJust)
@@ -57,14 +58,16 @@ lookupVar i = do
 
 specialOps :: Set Symbol
 specialOps = Set.fromList
-  [ "if"
+  [ "quote"
+  , "list" -- this is actually a builtin, but we protect it because backquote expressions rely on it
+  , "list*" -- see above
+  , "if"
   , "and"
   , "or"
   , "the"
   , "setq"
   , "defvar"
   , "defparameter"
-  , "quote"
   , "defun"
   , "lambda"
   , "let"
@@ -237,21 +240,15 @@ letBody _    (LList xs:body) = pure (xs, body)
 letBody name (_:_)           = evalError $ fromSymbol name <> ": invalid bindings"
 
 eval :: Expr -> Eval Expr
-eval (LInt n) = pure $ LInt n
-eval (LRatio n) = pure $ LRatio n
-eval (LBool b) = pure $ LBool b
-eval (LChar b) = pure $ LChar b
-eval (LKeyword b) = pure $ LKeyword b
-eval (LString s) = pure $ LString s
-eval (LFun f) = pure $ LFun f
-eval (LMacro f) = pure $ LMacro f
-eval (LBuiltin f) = pure $ LBuiltin f
 eval (LSymbol sym) = lookupVar sym
-eval (LDottedList xs _) = eval (LList xs)
+eval (LDottedList xs _) = eval (LList (NonEmpty.toList xs))
 eval (LList []) = pure nil
 eval (LList (f:args)) =
   case f of
-    -- NOTE: equivalent to (defmacro quote (x) (list 'quote x))
+    -- NOTE: this builtin is needed to support quoting; a quoted expression
+    -- `*x*` is literally turned into `(quote *x*)`, which should result in *x*
+    -- without evaluating it. The renderer simply has a special case for lists
+    -- of the form `(list 'quote x)`.
     LSymbol "quote" ->
       case args of
         [x] -> pure x
@@ -419,6 +416,8 @@ eval (LList (f:args)) =
       LFun     f' -> apply f' =<< traverse eval args
       LMacro   m  -> eval     =<< apply m args
       e           -> evalError $ "expected function in call: " <> showt e
+-- everything other than a list and a symbol is a self-evaluating expression
+eval f = pure f
 
 apply :: Closure -> [Expr] -> Eval Expr
 apply Closure{..} args = do

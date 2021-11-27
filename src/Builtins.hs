@@ -13,6 +13,8 @@ import Data.Bifunctor (second)
 import Data.Functor (($>), (<&>))
 import Data.IORef (newIORef, IORef)
 import Data.List (foldl', foldl1')
+import Data.List.NonEmpty (NonEmpty((:|)))
+import Data.List.NonEmpty qualified as NonEmpty
 import Data.Map.Strict qualified as Map
 import Data.Ratio ((%), numerator, denominator)
 import Data.Text qualified as Text
@@ -58,8 +60,9 @@ builtinPrims = fmap (second LBuiltin)
   , ("string<", stringLt)
   , ("string>=", stringGe)
   , ("string<=", stringLe)
-  , ("list", list)
   , ("cons", cons)
+  , ("list", list)
+  , ("list*", listStar)
   , ("car", car)
   , ("cdr", cdr)
   , ("set", primSet)
@@ -218,19 +221,34 @@ builtinPrims = fmap (second LBuiltin)
         equal' (LDottedList x x') (LDottedList y y') =
           if length x /= length y
           then pure False
-          else (&&) <$> (and <$> zipWithM equal' x y) <*> equal' x' y'
+          else (&&) <$> (and <$> zipWithM equal' (NonEmpty.toList x) (NonEmpty.toList y)) <*> equal' x' y'
         equal' (LBuiltin _) (LBuiltin _) = pure False
         equal' (LFun _) (LFun _) = pure False
         equal' x y = evalError $ "equal: incompatible types " <> renderType x <> " and " <> renderType y
 
+    cons :: Builtin
+    cons [x, LList y] = pure $ LList (x:y)
+    cons [x, LDottedList (y :| ys) z] = pure $ LDottedList (x :| (y : ys)) z
+    cons [x, y] = pure $ LDottedList (x :| []) y
+    cons args = numArgs "cons" 2 args
+
     list :: Builtin
     list xs = pure $ LList xs
 
-    cons :: Builtin
-    cons [x, LList y] = pure $ LList (x:y)
-    cons [x, LDottedList y z] = pure $ LDottedList (x:y) z
-    cons [x, y] = pure $ LDottedList [x] y
-    cons args = numArgs "cons" 2 args
+    listStar :: Builtin
+    listStar args =
+      case unsnoc args of
+        Nothing             -> numArgsAtLeast "list*" 1 []
+        Just (xs, tl) -> case NonEmpty.nonEmpty xs of
+          Nothing -> pure tl
+          Just xs' -> case tl of
+            LList ys -> pure $ LList (xs ++ ys)
+            y        -> pure  $ LDottedList xs' y
+      where
+        unsnoc :: [a] -> Maybe ([a], a)
+        unsnoc [] = Nothing
+        unsnoc [x] = Just ([], x)
+        unsnoc (x:xs) = (\(ys, y) -> (x:ys, y)) <$> unsnoc xs
 
     car :: Builtin
     car [LList []] = evalError "car: empty list"
