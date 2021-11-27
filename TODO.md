@@ -4,9 +4,11 @@
 - Tail call optimization
 - `defconst`
 - `let*`, `letrec`
-- backticks
 - `#:|...|`
 - numbers
-  - better promotions rules
+  - better promotion rules
   - floats
   - complex numbers
+- arrays, vectors
+- ADTs
+  - `defstruct`
