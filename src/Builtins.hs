@@ -25,6 +25,11 @@ import Errors
 import Eval (apply, eval, setVar, nil, typep, evalFile)
 import Types
 
+unsnoc :: [a] -> Maybe ([a], a)
+unsnoc [] = Nothing
+unsnoc [x] = Just ([], x)
+unsnoc (x:xs) = (\(ys, y) -> (x:ys, y)) <$> unsnoc xs
+
 type Builtin = [Expr] -> Eval Expr
 
 mkBuiltins :: IO (IORef Context)
@@ -63,6 +68,7 @@ builtinPrims = fmap (second LBuiltin)
   , ("cons", cons)
   , ("list", list)
   , ("list*", listStar)
+  , ("append", append)
   , ("car", car)
   , ("cdr", cdr)
   , ("set", primSet)
@@ -238,17 +244,26 @@ builtinPrims = fmap (second LBuiltin)
     listStar :: Builtin
     listStar args =
       case unsnoc args of
-        Nothing             -> numArgsAtLeast "list*" 1 []
+        Nothing -> numArgsAtLeast "list*" 1 []
         Just (xs, tl) -> case NonEmpty.nonEmpty xs of
           Nothing -> pure tl
           Just xs' -> case tl of
             LList ys -> pure $ LList (xs ++ ys)
             y        -> pure  $ LDottedList xs' y
+
+    append :: Builtin
+    append xs =
+      case unsnoc xs of
+        Nothing -> pure $ LList []
+        Just (_, LList _) -> fmap (LList . concat) $ traverse getList xs
+        Just (ys, z) -> do
+          res <- fmap concat $ traverse getList ys
+          case NonEmpty.nonEmpty res of
+            Nothing -> pure z
+            Just ys' -> pure $ LDottedList ys' z
       where
-        unsnoc :: [a] -> Maybe ([a], a)
-        unsnoc [] = Nothing
-        unsnoc [x] = Just ([], x)
-        unsnoc (x:xs) = (\(ys, y) -> (x:ys, y)) <$> unsnoc xs
+        getList (LList l) = pure l
+        getList _ = evalError "append: expected list"
 
     car :: Builtin
     car [LList []] = evalError "car: empty list"

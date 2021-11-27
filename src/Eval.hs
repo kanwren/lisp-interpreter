@@ -57,32 +57,43 @@ lookupVar i = do
     Just x  -> liftIO $ readIORef x
 
 specialOps :: Set Symbol
-specialOps = Set.fromList
-  [ "quote"
-  , "list" -- this is actually a builtin, but we protect it because backquote expressions rely on it
-  , "list*" -- see above
-  , "if"
-  , "and"
-  , "or"
-  , "the"
-  , "setq"
-  , "defvar"
-  , "defparameter"
-  , "defun"
-  , "lambda"
-  , "let"
-  , "defmacro"
-  , "flet"
-  , "labels"
-  , "macrolet"
-  , "progn"
-  , "when"
-  , "unless"
-  , "block"
-  , "return-from"
-  , "go"
-  , "tagbody"
-  ]
+specialOps = Set.fromList $ specialForms ++ protectedOps
+  where
+    specialForms =
+      [ "quote"
+      , "list"
+      , "list*"
+      , "eval"
+      , "if"
+      , "and"
+      , "or"
+      , "the"
+      , "setq"
+      , "defvar"
+      , "defparameter"
+      , "defun"
+      , "lambda"
+      , "let"
+      , "defmacro"
+      , "flet"
+      , "labels"
+      , "macrolet"
+      , "progn"
+      , "when"
+      , "unless"
+      , "block"
+      , "return-from"
+      , "go"
+      , "tagbody"
+      ]
+    -- These operations are protected because they are depended on by backquote
+    -- splicing, and should not be overridden
+    protectedOps =
+      [ "cons"
+      , "list"
+      , "list*"
+      , "append"
+      ]
 
 setVar :: Symbol -> Expr -> Eval ()
 setVar i val

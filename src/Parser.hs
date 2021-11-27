@@ -2,12 +2,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE ViewPatterns #-}
 
 module Parser (parseLine, parseFile) where
 
 import Control.Arrow (left)
 import Control.Monad (void)
 import Data.Functor (($>), (<&>))
+import Data.List.NonEmpty (NonEmpty(..))
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.Ratio ((%))
 import Data.Text (Text)
@@ -17,9 +19,11 @@ import Text.Megaparsec
 import Text.Megaparsec qualified as M
 import Text.Megaparsec.Char qualified as MC
 import Text.Megaparsec.Char.Lexer qualified as MCL
+import Data.List.Split qualified as Split
 
 import Char (parseSpecialChar)
 import Types
+import Data.List (foldl')
 
 type Parser = M.Parsec Void String
 
@@ -111,6 +115,9 @@ data Splice = ExprSplice | ListSplice
 pSplice :: Parser Splice
 pSplice = (symbol ",@" $> ListSplice) <|> (symbol "," $> ExprSplice)
 
+quote :: Expr -> Expr
+quote v = LList [LSymbol "quote", v]
+
 -- An xpression in a backquote
 pBackquoteExpr :: Parser Expr
 pBackquoteExpr = do
@@ -129,25 +136,57 @@ pBackquoteExpr = do
       , quote <$> pBool
       , quote <$> try pNumber
       , quote <$> pSymbol
-      , symbol "`" *> pBackquoteExpr -- TODO
+      , quote <$> (symbol "`" *> pBackquoteExpr)
       ]
       where
-        quote v = LList [LSymbol "quote", v]
         pQuoteBackquoteed = label "quoted backquote-expression" $ symbol "'" *> do
           optional pSplice >>= \case
             Nothing -> quote <$> pPendingSpliceExpr
             Just ExprSplice -> pExpr <&> \e -> LList [LSymbol "list", LList [LSymbol "quote", LSymbol "quote"], e]
             Just ListSplice -> pExpr <&> \e -> LList [LSymbol "cons", LList [LSymbol "quote", LSymbol "quote"], e]
         pListBackquoteed = label "quoted backquote-list" $ do
-          void $ symbol "("
-          _ <- fail "lists in backquotes have not yet been implemented" -- TODO
-          let
-            expr' = do
-              sp <- optional pSplice
-              (sp,) <$> case sp of
+          let expr' = optional pSplice >>= \sp -> (sp,) <$> case sp of
                 Nothing -> pPendingSpliceExpr
                 Just _  -> pExpr
-          undefined
+          between (symbol "(") (MC.char ')') $ do
+            leading <- M.sepEndBy (try expr') space
+            case NonEmpty.nonEmpty leading of
+              -- NOTE: a notable difference between this and CLisp is that `()`
+              -- will always just be NIL, regardless of depth of backquoting.
+              -- For consistency, we keep the intuitive behavior here,
+              -- especially since the other behavior means that for example:
+              --     ````nil => NIL
+              --     ````()  => NIL
+              --     ''''nil => '''NIL
+              --     ''''()  => '''NIL
+              -- meaning that NIL and () have to be special-cased to be the
+              -- same, regardless of the identifier
+              Nothing -> pure $ LList [LSymbol "quote", LList []]
+              Just neLeading -> optional (symbol "." *> lexeme expr') >>= \case
+                Nothing -> pure $ spliceBackquotedList neLeading
+                Just (Just ListSplice, _) -> fail "list splices after a dot are not allowed"
+                Just (_, x) -> pure $ LList [LSymbol "append", spliceBackquotedList neLeading, x]
+
+spliceBackquotedList :: NonEmpty (Maybe Splice, Expr) -> Expr
+spliceBackquotedList (NonEmpty.toList -> xs)
+  | any (\case (Just ListSplice, _) -> True; _ -> False) xs =
+    let
+      listSplice :: [(Maybe Splice, Expr)] -> [Expr]
+      listSplice ys =
+        let
+          addSplices :: [Expr] -> [(Maybe Splice, Expr)] -> [Expr]
+          addSplices acc [] = acc
+          addSplices acc ((Just ListSplice, s):ss) = acc ++ s:fmap snd ss
+          addSplices acc ((_, s):ss) = acc ++ [LList (LSymbol "list" : s:fmap snd ss)]
+        in foldl' addSplices [] $ Split.split (Split.whenElt (\case (Just ListSplice, _) -> True; _ -> False)) ys
+    in LList $ LSymbol "append":listSplice xs
+  | otherwise = LList $ LSymbol "list":fmap snd xs
+  -- TODO: optimizations:
+  -- - (x y z ... ,v) could be (list* 'x 'y 'z ... v)
+  -- - (,v ... x y z) could be (cons v (... 'x 'y 'z))
+  -- - (,@x) could be x, but is (append x)
+  -- - if there are no splices, the whole list could be quoted, but due to the
+  --   preemptive quoting in pPendingSpliceExpr, they'll already be quoted
 
 parseLine :: String -> Either String (Maybe Expr)
 parseLine = left errorBundlePretty . M.parse (space *> optional (lexeme pExpr) <* M.eof) "repl"

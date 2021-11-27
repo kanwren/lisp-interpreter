@@ -18,12 +18,6 @@
     xs
     (drop (- n 1) (cdr xs))))
 
-(defun append (xs ys)
-  (cond
-    ((null xs) ys)
-    ((null ys) xs)
-    (#t (cons (car xs) (append (cdr xs) ys)))))
-
 (defun reverse (xs)
   (labels
     ((rec (acc ys)
