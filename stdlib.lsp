@@ -27,17 +27,17 @@
     (rec nil xs)))
 
 (defmacro push (x xs)
-  (list 'setq xs (list 'cons x xs)))
+  `(setq ,xs (cons ,x ,xs)))
 
 ;;; Conditionals
 
 (defmacro cond (&rest conds)
   (foldr
     (lambda (clause1 rest)
-      (list 'if
-            (car clause1)
-            (cons 'progn (cdr clause1))
-            rest))
+      `(if
+         ,(car clause1)
+         (progn ,@(cdr clause1))
+         ,rest))
     nil conds))
 
 ; TODO: use defconst when implemented
@@ -46,69 +46,69 @@
 ;;; Loops
 
 (defmacro while (cond &rest body)
-  (list 'block nil
-        (list 'tagbody
-              'loop-begin
-              'loop-continue
-              (list 'unless cond (list 'go 'loop-end))
-              (cons 'progn body)
-              (list 'go 'loop-begin)
-              'loop-end)))
+  `(block nil
+          (tagbody
+            loop-begin
+            loop-continue
+            (unless ,cond (go loop-end))
+            (progn ,@body)
+            (go loop-begin)
+            loop-end)))
 
 (defmacro do-while (cond &rest body)
-  (list 'block nil
-        (list 'tagbody
-              'loop-begin
-              (cons 'progn body)
-              'loop-continue
-              (list 'when cond (list 'go 'loop-begin))
-              'loop-end)))
+  `(block nil
+          (tagbody
+            loop-begin
+            (progn ,@body)
+            loop-continue
+            (when ,cond (go loop-begin))
+            loop-end)))
 
 (defmacro dotimes (counter &rest body)
   (let ((var (car counter))
         (bound (car (cdr counter)))
         (rest (cdr (cdr counter))))
-    (list 'block nil
-          (list 'let (list (list var 0))
-                (list 'tagbody
-                      'loop-begin
-                      (list 'if (list '< var bound)
-                            (cons 'progn body)
-                            (list 'go 'loop-end))
-                      'loop-continue
-                      (list 'setq var (list '+ var 1))
-                      (list 'go 'loop-begin)
-                      'loop-end)
-                (cons 'progn rest)
-                ))))
+    `(block nil
+            (let ((,var 0))
+              (tagbody
+                loop-begin
+                (if (< ,var ,bound)
+                  (progn ,@body)
+                  (go loop-end))
+                loop-continue
+                (setq ,var (+ ,var 1))
+                (go loop-begin)
+                loop-end)
+              (progn ,@rest)
+              ))))
 
 (defmacro for-each (var xs &rest body)
   (let ((ys (gensym)))
-    (list 'let (list (list ys (list 'the 'list xs)))
-          (list 'block nil
-                (list 'tagbody
-                      'loop-begin
-                      (list 'when (list 'null ys) (list 'go 'loop-end))
-                      (list 'let (list (list var (list 'car ys)))
-                            (cons 'progn body))
-                      'loop-continue
-                      (list 'setq ys (list 'cdr ys))
-                      (list 'go 'loop-begin)
-                      'loop-end
-                      )))))
+    `(let ((,ys (the list ,xs)))
+       (block nil
+              (tagbody
+                loop-begin
+                (when (null ,ys) (go loop-end))
+                (let ((,var (car ,ys)))
+                  (progn ,@body))
+                loop-continue
+                (setq ,ys (cdr ,ys))
+                (go loop-begin)
+                loop-end
+                )))))
 
 ; TODO - other loops
 
-(defmacro return (&optional val) (list 'return-from nil val))
-(defmacro break () (list 'go 'loop-end))
-(defmacro continue () (list 'go 'loop-continue))
+(defmacro return (&optional val) `(return-from nil ,val))
+(defmacro break () `(go loop-end))
+(defmacro continue () `(go loop-continue))
 
 ;;; numeric utils
 
 (defmacro incf (var &optional (delta 1))
-  (list 'setq var (list '+ var delta)))
+  `(setq ,var (+ ,var ,delta)))
 (defmacro decf (var &optional (delta 1))
-  (list 'setq var (list '- var delta)))
+  `(setq ,var (- ,var ,delta)))
 
 (defun even (n) (= 0 (mod n 2)))
 (defun odd (n) (/= 0 (mod n 2)))
