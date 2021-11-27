@@ -1,5 +1,8 @@
 ;;; List utilities
 
+(defun lift-list (x)
+  (if (listp x) x (list x)))
+
 (defun foldr (f z xs)
   (if (null xs)
     z
@@ -7,6 +10,30 @@
 
 (defun elem (e xs &key (test equal))
   (foldr (lambda (x rest) (or (test e x) rest)) #f xs))
+
+(defmacro case-list (xs nil-case cons-case)
+  `(if (null ,xs)
+     (progn ,@(lift-list nil-case))
+     (let ((,(car cons-case) (car ,xs))
+           (,(car (cdr cons-case)) (cdr ,xs)))
+       (progn ,@(cdr (cdr cons-case))))))
+
+(defun range (lo &optional hi (step 1))
+  (when (null hi)
+    (setq hi lo)
+    (setq lo 0))
+  (let ((res nil) (i lo))
+    (cond
+      ((> step 0)
+       (while (< i hi)
+              (push i res)
+              (incf i step)))
+      ((< step 0)
+       (while (> i hi)
+              (push i res)
+              (incf i step)))
+      (otherwise nil))
+    (reverse res)))
 
 (defun take (n xs)
   (if (or (<= n 0) (null xs))
@@ -44,6 +71,15 @@
 (defvar otherwise #t)
 
 ;;; Loops
+
+(defmacro forever (&rest body)
+  `(block nil
+          (tagbody
+            loop-begin
+            loop-continue
+            (progn ,@body)
+            (go loop-begin)
+            loop-end)))
 
 (defmacro while (cond &rest body)
   `(block nil
