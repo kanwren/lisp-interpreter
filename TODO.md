@@ -4,7 +4,6 @@
 - Tail call optimization
 - `defconst`
 - `let*`, `letrec`
-- `#:|...|`
 - numbers
   - better promotion rules
   - floats

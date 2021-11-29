@@ -14,8 +14,12 @@ import Control.Monad.Catch (MonadMask, MonadCatch, MonadThrow)
 import Control.Monad.Except ( ExceptT(ExceptT), MonadError )
 import Control.Monad.IO.Class
 import Control.Monad.Reader (ReaderT(..), MonadReader, local, ask)
+import Control.Monad.State (MonadState, StateT(..), state)
 import Data.CaseInsensitive (CI, foldedCase, mk)
+import Data.Default (Default(..))
 import Data.IORef (IORef, readIORef, newIORef, writeIORef)
+import Data.List.NonEmpty (NonEmpty)
+import Data.List.NonEmpty qualified as NonEmpty
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Ratio qualified as Ratio
@@ -24,32 +28,27 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import TextShow (TextShow(..))
 import TextShow qualified (fromText, unwordsB, FromTextShow(..))
-import Control.Monad.State (MonadState, StateT(..), state)
-import Data.Default (Default(..))
-import Data.List.NonEmpty (NonEmpty)
-import Data.List.NonEmpty qualified as NonEmpty
 
 import Char (renderChar)
 
-newtype Symbol = Symbol { getSymbol :: CI Text }
-  deriving newtype (Eq, Ord, IsString)
-
-mkSymbol :: Text -> Symbol
-mkSymbol = Symbol . mk
-
-fromSymbol :: Symbol -> Text
-fromSymbol (Symbol s) = foldedCase s
-
-data Keyword = SymKeyword Symbol | ArbKeyword Text
+data Symbol
+  = SimpleSymbol (CI Text)
+  | ArbSymbol Text
   deriving (Eq, Ord)
 
-renderKeyword :: Keyword -> Text
-renderKeyword = \case
-  SymKeyword sym -> ":" <> fromSymbol sym
-  ArbKeyword sym -> ":|" <> Text.concatMap escapePipe sym <> "|"
-  where
-    escapePipe '|' = "\\|"
-    escapePipe c = Text.singleton c
+instance IsString Symbol where
+  fromString = SimpleSymbol . fromString
+
+instance TextShow Symbol where
+  showb = \case
+    SimpleSymbol s -> TextShow.fromText (foldedCase s)
+    ArbSymbol s -> "|" <> TextShow.fromText (Text.replace "|" "\\|" s) <> "|"
+
+newtype Keyword = Keyword { getKeyword :: Symbol }
+  deriving (Eq, Ord)
+
+instance TextShow Keyword where
+  showb (Keyword s) = ":" <> showb s
 
 data Closure = Closure
   { closureName :: Maybe Symbol
@@ -77,10 +76,10 @@ data Expr
   deriving Show via (TextShow.FromTextShow Expr)
 
 renderType :: Expr -> Text
-renderType = fromSymbol . typeToSymbol
+renderType = showt . typeToSymbol
 
 typeToSymbol :: Expr -> Symbol
-typeToSymbol = \case
+typeToSymbol = SimpleSymbol . \case
   LInt _ -> "integer"
   LRatio _ -> "ratio"
   LBool _ -> "bool"
@@ -124,9 +123,9 @@ instance TextShow Expr where
     LBool False -> "#f"
     LBool True -> "#t"
     LChar c -> TextShow.fromText $ renderChar c
-    LKeyword kw -> TextShow.fromText $ renderKeyword kw
+    LKeyword kw -> showb kw
     LString s -> showb s
-    LSymbol s -> TextShow.fromText $ fromSymbol s
+    LSymbol s -> showb s
     LList [LSymbol "quote", x] -> "'" <> showb x
     LList [] -> "nil"
     LList xs -> "(" <> TextShow.unwordsB (fmap showb xs) <> ")"
@@ -150,8 +149,8 @@ renderTagName :: TagName -> Text
 renderTagName = \case
   TagInt n -> showt n
   TagRatio n -> renderRatio n
-  TagSymbol sym -> fromSymbol sym
-  TagKeyword kw -> renderKeyword kw
+  TagSymbol sym -> showt sym
+  TagKeyword kw -> showt kw
 
 data Bubble
   = ReturnFrom Symbol Expr
@@ -171,7 +170,7 @@ instance Monoid Context where
 newtype SymbolGenerator = SymbolGenerator { getSymGen :: Int }
 
 nextSym :: SymbolGenerator -> (Symbol, SymbolGenerator)
-nextSym (SymbolGenerator n) = (Symbol (mk ("#:g" <> showt n)), SymbolGenerator (n + 1))
+nextSym (SymbolGenerator n) = (SimpleSymbol (mk ("#:g" <> showt n)), SymbolGenerator (n + 1))
 
 instance Default SymbolGenerator where
   def = SymbolGenerator 0

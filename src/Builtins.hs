@@ -86,12 +86,12 @@ builtinPrims = fmap (second LBuiltin)
       where
         go acc [] = pure $ reverse acc
         go acc (LInt x:xs) = go (x:acc) xs
-        go _ (e:_) = evalError $ fromSymbol name <> ": not a number: " <> renderType e
+        go _ (e:_) = evalError $ showt name <> ": not a number: " <> renderType e
 
     toRatio :: Symbol -> Expr -> Eval Rational
     toRatio _ (LInt n) = pure $ n % 1
     toRatio _ (LRatio n) = pure n
-    toRatio name e = evalError $ fromSymbol name <> ": not a number: " <> renderType e
+    toRatio name e = evalError $ showt name <> ": not a number: " <> renderType e
 
     promote :: Symbol -> [Expr] -> Eval (Either [Rational] [Integer])
     promote name = go []
@@ -102,7 +102,7 @@ builtinPrims = fmap (second LBuiltin)
         go acc (LRatio x:xs) = do
           rest <- traverse (toRatio name) xs
           pure $ Left $ reverse (fmap (1 %) acc) ++ x:rest
-        go _ (e:_) = evalError $ fromSymbol name <> ": not a number: " <> renderType e
+        go _ (e:_) = evalError $ showt name <> ": not a number: " <> renderType e
 
     iadd :: Builtin
     iadd args = promote "+" args <&> \case
@@ -191,7 +191,7 @@ builtinPrims = fmap (second LBuiltin)
     stringComparison _ cmp [LKeyword x, LKeyword y] = pure $ LBool (cmp x y)
     stringComparison _ cmp [LSymbol x, LSymbol y] = pure $ LBool (cmp x y)
     stringComparison _ cmp [LChar x, LChar y] = pure $ LBool (cmp x y)
-    stringComparison name _ [x, y] = evalError $ fromSymbol name <> ": invalid argument types " <> renderType x <> " and " <> renderType y
+    stringComparison name _ [x, y] = evalError $ showt name <> ": invalid argument types " <> renderType x <> " and " <> renderType y
     stringComparison name _ args = numArgs name 2 args
 
     stringEq, stringGt, stringLt, stringGe, stringLe :: Builtin

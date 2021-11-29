@@ -7,10 +7,12 @@
 module Parser (parseLine, parseFile) where
 
 import Control.Arrow (left)
-import Control.Monad (void)
+import Control.Monad (void, guard)
+import Data.CaseInsensitive (CI, foldedCase, mk)
 import Data.Functor (($>), (<&>))
 import Data.List.NonEmpty (NonEmpty(..))
 import Data.List.NonEmpty qualified as NonEmpty
+import Data.List.Split qualified as Split
 import Data.Ratio ((%))
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -19,7 +21,6 @@ import Text.Megaparsec
 import Text.Megaparsec qualified as M
 import Text.Megaparsec.Char qualified as MC
 import Text.Megaparsec.Char.Lexer qualified as MCL
-import Data.List.Split qualified as Split
 
 import Char (parseSpecialChar)
 import Types
@@ -54,29 +55,60 @@ pChar = label "char literal" $ do
   try (LChar <$> parseSpecialChar) <|> pAnyChar <?> "char name"
 
 pKeyword :: Parser Expr
-pKeyword = label "keyword" $ MC.char ':' *> M.choice
-  [ MC.char '|' *> (LKeyword . ArbKeyword . Text.pack <$> M.manyTill (try (MC.string "\\|" $> '|') <|> MCL.charLiteral) (MC.char '|'))
-  , LKeyword . SymKeyword . mkSymbol <$> pIdent -- TODO: this is kinda a hack
-  ]
+pKeyword = label "keyword" $ MC.char ':' *> (LKeyword . Keyword <$> pId)
 
 pString :: Parser Expr
 pString = label "string literal" $ LString . Text.pack <$> (MC.char '"' *> M.manyTill MCL.charLiteral (MC.char '"'))
 
-pIdent :: Parser Text
-pIdent = label "identifier" $ do
-  let idChar = MC.letterChar <|> M.oneOf ("+-*/!$%&|:<=>?@^_~." :: String)
-        <?> "identifier first char"
-  let idTailChar = idChar <|> MC.numberChar <|> M.oneOf ("#" :: String)
-        <?> "identifier char"
-  first <- idChar
-  rest <- do
-    if first == '.'
-    then M.some idTailChar
-    else M.many idTailChar
-  pure $ Text.pack $ first:rest
+-- TODO: allow identifiers beginning with numbers to be arbitrary symbols
+pId :: Parser Symbol
+pId = label "keyword" $ do
+    res <- fmap collect identifier
+    guard $ res /= SimpleSymbol "."
+    pure res
+  where
+    idHeadChar, idChar :: Parser Char
+    idHeadChar = label "identifier first char" $ do
+      MC.letterChar <|> M.oneOf ("+-*/!$%&:<=>?@^_~." :: String) <|> MC.numberChar
+    idChar = label "identifier char" $ do
+      idHeadChar <|> M.oneOf ("#" :: String)
+
+    arbString :: Parser Text
+    arbString = MC.char '|' *> (Text.pack <$> M.manyTill ((MC.string "\\|" $> '|') <|> M.anySingle) (MC.char '|'))
+
+    firstChar :: Parser (Either Text (CI Text))
+    firstChar = M.choice
+      [ Left <$> arbString
+      , Right . mk . Text.singleton <$> idHeadChar
+      ]
+
+    restChars :: Parser [Either Text (CI Text)]
+    restChars = M.many $ M.choice
+      [ Left <$> arbString
+      , Right . mk . Text.pack <$> M.some idChar
+      ]
+
+    identifier :: Parser (NonEmpty (Either Text (CI Text)))
+    identifier = (:|) <$> firstChar <*> restChars
+
+    toArbSymbol :: NonEmpty (Either Text (CI Text)) -> Symbol
+    toArbSymbol = ArbSymbol . Text.concat . fmap (either id foldedCase) . NonEmpty.toList
+
+    collect :: NonEmpty (Either Text (CI Text)) -> Symbol
+    collect chunks =
+      case NonEmpty.filter (/= Left "") chunks of
+        -- implies that entire identifier was ||
+        []         -> ArbSymbol ""
+        Right x:xs -> go x xs
+        x:xs       -> toArbSymbol $ x:|xs
+      where
+        go :: CI Text -> [Either Text (CI Text)] -> Symbol
+        go acc []           = SimpleSymbol acc
+        go acc (Right x:xs) = go (acc <> x) xs
+        go acc (Left x:xs)  = toArbSymbol $ Right acc:|(Left x:xs)
 
 pSymbol :: Parser Expr
-pSymbol = label "keyword" $ LSymbol . mkSymbol <$> pIdent
+pSymbol = LSymbol <$> pId
 
 -- 'x is the same as (quote x), where "quote" is a special form that returns
 -- its only argument without evaluating it. This is coupled with the

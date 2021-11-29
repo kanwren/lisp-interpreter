@@ -53,7 +53,7 @@ lookupVar :: Symbol -> Eval Expr
 lookupVar i = do
   Context ctx <- liftIO . readIORef =<< ask
   case ctx Map.!? i of
-    Nothing -> evalError $ "variable not in scope: " <> fromSymbol i
+    Nothing -> evalError $ "variable not in scope: " <> showt i
     Just x  -> liftIO $ readIORef x
 
 specialOps :: Set Symbol
@@ -97,7 +97,7 @@ specialOps = Set.fromList $ specialForms ++ protectedOps
 
 setVar :: Symbol -> Expr -> Eval ()
 setVar i val
-  | i `Set.member` specialOps = evalError $ "error: " <> fromSymbol i <> " is a special operator and may not be overridden"
+  | i `Set.member` specialOps = evalError $ "error: " <> showt i <> " is a special operator and may not be overridden"
   | otherwise = do
     ctxVar <- ask
     Context ctx <- liftIO $ readIORef ctxVar
@@ -126,12 +126,12 @@ functionWithContext context opName name n args =
         , closureBody = body
         , closureContext = context
         }
-    (_:_) -> evalError $ fromSymbol opName <> ": invalid parameter list"
+    (_:_) -> evalError $ showt opName <> ": invalid parameter list"
     -- if name is given, it was a parameter, so count it in the list
     _ -> numArgsAtLeast opName n $ maybe args (\n' -> LSymbol n':args) name
   where
     toError :: Text -> Eval a
-    toError e = evalError $ fromSymbol opName <> ": " <> e
+    toError e = evalError $ showt opName <> ": " <> e
     parseArgs :: [Expr] -> Eval ([Symbol], [(Symbol, Expr)], Maybe Symbol, Map Symbol Expr)
     parseArgs = mainArgs []
     -- Parse the main arguments from the parameter list
@@ -178,13 +178,13 @@ typep name v = go
     go (LSymbol s) =
       case symbolToTypePred s of
         Just p  -> pure $ p v
-        Nothing -> evalError $ fromSymbol name <> ": invalid type specifier"
+        Nothing -> evalError $ showt name <> ": invalid type specifier"
     go (LList (LSymbol "and":spec)) = and <$> traverse go spec
     go (LList (LSymbol "or":spec)) = or <$> traverse go spec
     go (LList (LSymbol "not":spec)) =
       case spec of
         [p] -> not <$> go p
-        _ -> evalError $ fromSymbol name <> ": expected exactly 1 argument to not, but got " <> showt (length spec)
+        _ -> evalError $ showt name <> ": expected exactly 1 argument to not, but got " <> showt (length spec)
     -- TODO: support promotion
     go (LList (LSymbol "integer":spec)) =
       case v of
@@ -193,7 +193,7 @@ typep name v = go
             [LInt lower] -> pure $ lower <= n
             [LList [LInt lower]] -> pure $ lower <= n
             [LInt lower, LInt upper] -> pure $ lower <= n && n <= upper
-            _ -> evalError $ fromSymbol name <> ": invalid type specifier: invalid arguments to predicate integer"
+            _ -> evalError $ showt name <> ": invalid type specifier: invalid arguments to predicate integer"
         _ -> pure False
     go (LList (LSymbol "rational":spec)) =
       case v of
@@ -202,9 +202,9 @@ typep name v = go
             [LRatio lower] -> pure $ lower <= n
             [LList [LRatio lower]] -> pure $ lower <= n
             [LRatio lower, LRatio upper] -> pure $ lower <= n && n <= upper
-            _ -> evalError $ fromSymbol name <> ": invalid type specifier: invalid arguments to predicate integer"
+            _ -> evalError $ showt name <> ": invalid type specifier: invalid arguments to predicate integer"
         _ -> pure False
-    go _ = evalError $ fromSymbol name <> ": invalid type specifier"
+    go _ = evalError $ showt name <> ": invalid type specifier"
 
 -- Evaluate a list of expressions and return the value of the final expression
 progn :: [Expr] -> Eval Expr
@@ -248,7 +248,7 @@ condition cond = truthy <$> eval cond
 letBody :: Symbol -> [Expr] -> Eval ([Expr], [Expr])
 letBody name []              = numArgs name 1 []
 letBody _    (LList xs:body) = pure (xs, body)
-letBody name (_:_)           = evalError $ fromSymbol name <> ": invalid bindings"
+letBody name (_:_)           = evalError $ showt name <> ": invalid bindings"
 
 eval :: Expr -> Eval Expr
 eval (LSymbol sym) = lookupVar sym
@@ -440,8 +440,8 @@ apply Closure{..} args = do
       -- let any (return-from)s with a different label to bubble up
       ReturnFrom blockName val
         | Just blockName == closureName -> pure val
-        | otherwise -> evalError $ fromSymbol name <> ": error returning from block " <> showt (fromSymbol blockName) <> ": no such block in scope"
-      TagGo tagName -> evalError $ fromSymbol name <> ": error going to tag " <> renderTagName tagName <> ": no such tag in scope"
+        | otherwise -> evalError $ showt name <> ": error returning from block " <> showt (showt blockName) <> ": no such block in scope"
+      TagGo tagName -> evalError $ showt name <> ": error going to tag " <> renderTagName tagName <> ": no such tag in scope"
       e -> throwError e
   where
     minLen = length closureParams
@@ -470,9 +470,9 @@ apply Closure{..} args = do
     matchParamsKeywords = go
       where
         go res [] = pure $ Map.assocs res
-        go res (LKeyword k@(SymKeyword s):v:rest)
+        go res (LKeyword k@(Keyword s):v:rest)
           | s `Map.member` res = go (Map.insert s v res) rest
-          | otherwise = evalError $ fromSymbol name <> ": unexpected keyword: " <> renderKeyword k
-        go _ (LKeyword _:_) = evalError $ fromSymbol name <> ": expected value for keyword argument"
-        go _ (x:_) = evalError $ fromSymbol name <> ": unexpected parameter in keyword arguments: " <> showt x
+          | otherwise = evalError $ showt name <> ": unexpected keyword: " <> showt k
+        go _ (LKeyword _:_) = evalError $ showt name <> ": expected value for keyword argument"
+        go _ (x:_) = evalError $ showt name <> ": unexpected parameter in keyword arguments: " <> showt x
 
