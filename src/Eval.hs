@@ -175,12 +175,20 @@ functionWithContext context opName name n args =
 typep :: Symbol -> Expr -> Expr -> Eval Bool
 typep name v = go
   where
+    allM :: (Foldable f, Monad m) => (a -> m Bool) -> f a -> m Bool
+    allM p = foldr (andM . p) (pure True)
+      where andM a b = a >>= \a' -> if a' then b else pure False
+
+    anyM :: (Foldable f, Monad m) => (a -> m Bool) -> f a -> m Bool
+    anyM p = foldr (orM . p) (pure False)
+      where orM a b = a >>= \a' -> if a' then pure True else b
+
     go (LSymbol s) =
       case symbolToTypePred s of
         Just p  -> pure $ p v
         Nothing -> evalError $ showt name <> ": invalid type specifier"
-    go (LList (LSymbol "and":spec)) = and <$> traverse go spec
-    go (LList (LSymbol "or":spec)) = or <$> traverse go spec
+    go (LList (LSymbol "and":spec)) = allM go spec
+    go (LList (LSymbol "or":spec)) = anyM go spec
     go (LList (LSymbol "not":spec)) =
       case spec of
         [p] -> not <$> go p
